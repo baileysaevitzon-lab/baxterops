@@ -91,7 +91,7 @@ export default function UtilityAllowance() {
                 {over && (
                   <p className="text-xs text-rose-700 mt-2">
                     Tenant rent + utility allowance exceeds the LAHD cap. Verify with Catherine / Urban / LAHD.
-                    This may indicate a unit/tenant mismatch (see Yolanda Benning precedent in tenant outreach).
+                    This may indicate a unit/tenant mismatch (see open LAHD escalation case in tenant outreach — Admin/Manager only).
                   </p>
                 )}
               </div>

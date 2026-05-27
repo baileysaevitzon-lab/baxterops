@@ -213,6 +213,40 @@ const COMP_VERIFICATION_OVERRIDES: Record<string, Partial<CompetitorProperty>> =
       "fq-zen-movein-cost","fq-zen-fees-waivable","fq-zen-source-merging",
     ],
   },
+  "c-jardine": {
+    sourceType: "field_tour",
+    dataConfidence: "high",
+    lastVerifiedAt: "2026-05-27",
+    verifiedBy: "Bailey (field tour)",
+    dataQualityFlags: [
+      "fq-jardine-504-availability","fq-jardine-501-availability",
+      "fq-jardine-pest-fee","fq-jardine-other-monthly-fee",
+      "fq-jardine-theater-rental","fq-jardine-clubhouse-rental",
+      "fq-jardine-listing-verify","fq-jardine-not-comparable",
+      "fq-jardine-prices-daily-change",
+    ],
+  },
+  "c-highland": {
+    sourceType: "field_tour",
+    dataConfidence: "high",
+    lastVerifiedAt: "2026-05-27",
+    verifiedBy: "Bailey (field tour)",
+    dataQualityFlags: [
+      "fq-highland-1br-unit-number","fq-highland-2br-unit-number",
+      "fq-highland-2br-vs-402","fq-highland-utility-billing",
+      "fq-highland-concession-applicability","fq-highland-listing-verify",
+    ],
+  },
+  "c-vine-1600": {
+    sourceType: "field_tour",
+    dataConfidence: "high",
+    lastVerifiedAt: "2026-05-27",
+    verifiedBy: "Bailey (field tour)",
+    dataQualityFlags: [
+      "fq-vine-address","fq-vine-unit-number","fq-vine-utility-cost",
+      "fq-vine-parking-cost","fq-vine-listing-verify",
+    ],
+  },
 };
 
 function withVerificationDefaults(comp: CompetitorProperty): CompetitorProperty {
@@ -546,16 +580,25 @@ const RAW_COMPETITORS: CompetitorProperty[] = [
     distanceMiles: 0.1,
     occupancyPct: 92,
     leasedPct: 92,
-    specials: "Up to 8 weeks free + $1000 look-and-lease",
-    freeRentWeeks: 8,
-    lookAndLeaseBonus: 1000,
-    amenities: ["rooftop", "gym", "lounge"],
+    specials: "None — low vacancy. Prices subject to daily change. (Prior call-around: up to 8 weeks free + $1K LAL.)",
+    freeRentWeeks: 0,
+    lookAndLeaseBonus: 0,
+    amenities: ["rooftop", "rooftop_pool", "gym", "theater", "garden_room", "pool_clubhouse", "security_24_7", "luxury_lobby", "coffee_offered", "scent_control", "exterior_quality"],
     threatLevel: 5,
     compQualityScore: 83,
+    competitorStrategicType: "premium_amenity_comp",
+    competitorTags: ["premium_amenity_comp","field_verified","luxury_tier","low_availability","not_direct_rent_comp","scent_control","coffee_offered"],
+    fieldVerified: true,
+    fieldVerifiedAt: "2026-05-27",
+    fieldVerifiedBy: "Bailey",
+    fieldVerificationConfidence: "high",
+    amenityThreatLevel: 5,
+    parkingThreatLevel: 3,
+    concessionThreatLevel: 2,
     unitTypes: [
-      { type: "studio", minSqft: 589, maxSqft: 589, avgRent: 2862, avgSqft: 589 },
-      { type: "1BR", minRent: 3195, maxRent: 3895, avgRent: 3545, avgSqft: 949 },
-      { type: "2BR", minRent: 3995, maxRent: 4595, avgRent: 4295, avgSqft: 1538 },
+      // Bailey field tour 2026-05-27 — observed units.
+      { type: "1BR", minRent: 3155, maxRent: 3155, avgRent: 3155, avgSqft: 583 },
+      { type: "2BR", minRent: 5295, maxRent: 5295, avgRent: 5295, avgSqft: 1304 },
     ],
     notes: "Adjacent property — true comp.",
   },
@@ -576,6 +619,61 @@ const RAW_COMPETITORS: CompetitorProperty[] = [
       { type: "studio", avgRent: 2235, avgSqft: 482 },
       { type: "1BR", minRent: 3155, maxRent: 3695, avgRent: 3425, avgSqft: 705 },
       { type: "2BR", minRent: 5115, maxRent: 5955, avgRent: 5535, avgSqft: 1127 },
+    ],
+  },
+  // Sprint 8 — The Highland (Bailey field tour 2026-05-27).
+  {
+    id: "c-highland",
+    name: "The Highland",
+    address: "1411 N Highland Ave, Hollywood, CA 90028",
+    phone: "(323) 741-6667",
+    website: "https://www.thehighlandla.com",
+    units: 76,
+    distanceMiles: 0.4,
+    specials: "8 weeks free, applied months 2 + 4 (per flyer)",
+    freeRentWeeks: 8,
+    amenities: ["rooftop_pool","gym","courtyard","lounge","office_spaces","maintenance_24_7"],
+    threatLevel: 4,
+    compQualityScore: 76,
+    competitorStrategicType: "balanced_comp",
+    competitorTags: ["field_verified","nearby_amenity_comp","motel_circulation","small_bedrooms","tiny_balcony","carpet_in_bedroom","rooftop_pool"],
+    fieldVerified: true,
+    fieldVerifiedAt: "2026-05-27",
+    fieldVerifiedBy: "Bailey",
+    fieldVerificationConfidence: "high",
+    amenityThreatLevel: 4,
+    parkingThreatLevel: 3,
+    concessionThreatLevel: 4,
+    unitTypes: [
+      // Bailey tour observed.
+      { type: "1BR", minRent: 2870, maxRent: 2870, avgRent: 2870, avgSqft: 730 },
+      { type: "2BR", minRent: 4169, maxRent: 4169, avgRent: 4169, avgSqft: 1287 },
+    ],
+  },
+  // Sprint 8 — Actual 1600 Vine (Bailey field tour 2026-05-27).
+  // NOTE: address unknown; do not invent. Display name only.
+  {
+    id: "c-vine-1600",
+    name: "1600 Vine",
+    address: "1600 Vine St, Hollywood, CA (needs verification)",
+    units: 0,
+    distanceMiles: undefined,
+    specials: "Not disclosed during tour.",
+    amenities: ["pool","concierge","in_unit_laundry"],
+    threatLevel: 4,
+    compQualityScore: 72,
+    competitorStrategicType: "premium_amenity_comp",
+    competitorTags: ["field_verified","poor_service","large_2br","two_story_unit","huge_closets","concierge"],
+    fieldVerified: true,
+    fieldVerifiedAt: "2026-05-27",
+    fieldVerifiedBy: "Bailey",
+    fieldVerificationConfidence: "high",
+    amenityThreatLevel: 4,
+    parkingThreatLevel: 3,
+    concessionThreatLevel: 2,
+    unitTypes: [
+      // Bailey tour: 5th floor 2BR / 2.5BA — unit number unknown.
+      { type: "2BR", minRent: 5200, maxRent: 5200, avgRent: 5200, avgSqft: 2178 },
     ],
   },
   {
@@ -697,58 +795,61 @@ export const LEADS: Lead[] = [
 ];
 
 // --- Tenants — recertification queue (illustrative) ---
+/**
+ * Sprint 7 — bundle-safe tenant aggregate only.
+ *
+ * Sensitive fields (real name, income, LAHD cap detail, private notes, health-related
+ * notes, contact info) moved to Supabase tables `tenants` + `tenant_private_details`
+ * with role-restricted RLS (admin/manager only on private_details).
+ *
+ * This array exists only so existing static UI keeps rendering without crashing while
+ * the tenant outreach / recertification pages migrate to Supabase reads. Aggregate
+ * status only — NO names, NO income, NO LAHD detail, NO private notes.
+ */
 export const TENANTS: Tenant[] = [
   {
     id: "t-yolanda",
-    name: "Yolanda Benning",
+    name: "Affordable-unit escalation #1",
     unitNumber: "—",
     program: "section8",
     subsidyProvider: "HACLA",
-    moveInDate: "2025-11-25",
     status: "escalation",
-    documentsRequested: ["Income verification", "LAHD income certification"],
-    documentsReceived: ["Income verification"],
-    contactAttempts: 2,
-    responseStatus: "in_progress",
-    tenantRentPortion: 1900,
-    lahdMaxAllowed: 1000,
+    documentsRequested: [],
+    documentsReceived: [],
+    contactAttempts: 0,
     riskLevel: "high",
-    privateNotes: "Income $53K — above LAHD cap. Tenant share $1,900 exceeds $1,000 LAHD limit. Joanna handling move discussion. ESCALATED to Catherine.",
-    notes: "LAHD compliance risk — move-out + re-inspect with HACLA likely.",
+    notes: "Sensitive details in Supabase (tenant_private_details). Admin/Manager only.",
     assignedStaff: "Catherine",
   },
   {
     id: "t-francina",
-    name: "Francina Williams",
-    unitNumber: "213",
+    name: "Tenant 2",
+    unitNumber: "—",
     program: "section8",
     subsidyProvider: "HACLA",
     status: "all_docs",
-    documentsRequested: ["Pay stubs", "Income verification", "Household composition"],
-    documentsReceived: ["Pay stubs", "Income verification", "Household composition"],
-    contactAttempts: 1,
-    responseStatus: "completed",
-    utilityAllowance: 206,
+    documentsRequested: [],
+    documentsReceived: [],
+    contactAttempts: 0,
     riskLevel: "low",
     assignedStaff: "Catherine",
   },
   {
     id: "t-charlotte",
-    name: "Charlotte Smith",
+    name: "Brilliant Corners candidate",
     unitNumber: "—",
     program: "brilliant_corners",
     subsidyProvider: "Brilliant Corners",
     status: "docs_requested",
-    documentsRequested: ["Income verification", "ID", "Household composition", "Benefit letter"],
+    documentsRequested: [],
     documentsReceived: [],
-    contactAttempts: 1,
+    contactAttempts: 0,
     riskLevel: "medium",
-    notes: "Highest priority Brilliant Corners referral for the 1 vacant affordable unit.",
     assignedStaff: "Joanna",
   },
   {
     id: "t-summer",
-    name: "Summer Clowette",
+    name: "Tenant 4",
     unitNumber: "—",
     program: "conventional",
     status: "not_started",
@@ -756,8 +857,6 @@ export const TENANTS: Tenant[] = [
     documentsReceived: [],
     contactAttempts: 0,
     riskLevel: "medium",
-    privateNotes: "3-day notice issued. Reports cancer diagnosis. Grandmother assisting.",
-    notes: "Collections — handle with sensitivity.",
     assignedStaff: "Joanna",
   },
 ];
@@ -780,7 +879,7 @@ export const TASKS: Task[] = [
   { id: "tk-2", title: "Cut Apartments.com tier or pause", category: "marketing", owner: "Evan", priority: 4, status: "open" },
   { id: "tk-3", title: "Reactivate Craigslist listings", category: "marketing", owner: "Lucas", priority: 4, status: "open" },
   { id: "tk-4", title: "Submit LAHD utility allowance forms to Urban", category: "lahd", owner: "Catherine", priority: 5, status: "in_progress" },
-  { id: "tk-5", title: "Yolanda Benning — schedule HACLA move conversation", category: "hacla", owner: "Joanna", priority: 5, status: "in_progress", relatedTenantId: "t-yolanda" },
+  { id: "tk-5", title: "Escalated affordable-unit case — schedule HACLA move conversation", category: "hacla", owner: "Joanna", priority: 5, status: "in_progress", relatedTenantId: "t-yolanda" },
   { id: "tk-6", title: "Migrate inherited Baxter website", category: "marketing", owner: "Bailey", priority: 3, status: "open" },
   { id: "tk-7", title: "Reupholster rooftop lounge chairs (Catherine sourcing fabric)", category: "data_cleanup", owner: "Catherine", priority: 2, status: "open" },
   { id: "tk-8", title: "Fill Brilliant Corners affordable unit", category: "recertification", owner: "Joanna", priority: 4, status: "open", relatedTenantId: "t-charlotte" },

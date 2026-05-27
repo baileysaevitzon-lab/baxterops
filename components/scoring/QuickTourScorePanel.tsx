@@ -23,14 +23,14 @@ interface Props {
   compact?: boolean;
 }
 
-// Section groupings per spec
+// Section groupings (Sprint 8 — full rubric).
 const SECTIONS: Array<{ label: string; keys: string[] }> = [
-  { label: "Booking", keys: ["tour_booking_ease", "response_speed_hours"] },
-  { label: "Leasing Agent", keys: ["kindness", "professionalism"] },
-  { label: "Building / Cleanliness", keys: ["cleanliness", "hallway_quality", "common_area_quality"] },
-  { label: "Amenities / Unit", keys: ["amenity_quality", "unit_quality", "tour_quality"] },
-  { label: "Concessions / Closing", keys: ["closing_strength", "follow_up_quality", "desperation_vs_confidence", "pressure_level", "drinks_or_snacks_offered", "hidden_concession_offered", "parking_deal_offered", "fees_waivable"] },
-  { label: "Final Verdict", keys: ["would_renter_choose_over_baxter"] },
+  { label: "Leasing Experience", keys: ["tour_booking_ease","response_speed_hours","punctuality","kindness","professionalism","service_quality","closing_strength","follow_up_quality","tour_quality","desperation_vs_confidence","pressure_level","drinks_or_snacks_offered","coffee_offered"] },
+  { label: "Building Feel",      keys: ["cleanliness","scent_quality","luxury_feel","exterior_quality","hallway_quality","hallway_entry_quality","common_area_quality","quietness","maintenance_presence"] },
+  { label: "Unit Quality",       keys: ["unit_quality","layout_quality","bedroom_size_quality","closet_storage_quality","balcony_quality"] },
+  { label: "Amenities",          keys: ["amenity_quality"] },
+  { label: "Deal Terms / Fees",  keys: ["concession_aggressiveness","hidden_concession_offered","parking_deal_offered","fees_waivable","fees_transparency","utilities_transparency"] },
+  { label: "Baxter Comparability", keys: ["would_renter_choose_over_baxter","not_directly_comparable_to_baxter"] },
 ];
 
 type Val = number | boolean | string | undefined;

@@ -102,6 +102,7 @@ export type CompSourceType =
   | "zumper"
   | "google_business"
   | "other_listing"
+  | "field_tour"
   | "unverified";
 
 export type DataConfidence = "high" | "medium" | "low" | "unknown";

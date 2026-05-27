@@ -25,6 +25,8 @@ export default function PricingModel() {
 
   const zen522 = observed.find(o => o.unitNumber === "522");
   const zen625 = observed.find(o => o.unitNumber === "625");
+  const jardine504 = observed.find(o => o.competitorId === "c-jardine" && o.unitNumber === "504");
+  const jardine501 = observed.find(o => o.competitorId === "c-jardine" && o.unitNumber === "501");
 
   return (
     <>
@@ -73,6 +75,41 @@ export default function PricingModel() {
           )}
         </CardBody>
       </Card>
+
+      {(jardine504 || jardine501) && (
+        <Card className="mb-6 border-l-4 border-l-amber-500">
+          <CardHeader
+            title="Jardine Field Tour Takeaway"
+            subtitle="Premium amenity comp — LUXURY TIER, low vacancy, no specials. Do not use as direct Baxter rent anchor."
+          />
+          <CardBody>
+            <p className="text-sm text-slate-700">
+              Jardine is field-tour verified (Bailey 2026-05-27) as materially more luxury than Baxter. Strong amenity stack (rooftop pool, theater, garden room, clubhouse, 24/7 security, scent control, coffee). Prices are subject to daily change and there are no specials due to low vacancy.
+              <strong> Use Jardine observed rents as a premium nearby ceiling, NOT a direct Baxter rent target.</strong>
+            </p>
+            <div className="mt-3 grid grid-cols-2 lg:grid-cols-3 gap-2 text-xs">
+              {jardine504 && (
+                <div className="bg-slate-50 rounded p-2">
+                  <div className="text-slate-500">Jardine 504 (1BR)</div>
+                  <div className="font-medium">{fmtMoney(jardine504.grossRent)} · 583 sqft</div>
+                  <div className="text-[10px] text-slate-500">no balcony · live-confirm availability</div>
+                </div>
+              )}
+              {jardine501 && (
+                <div className="bg-slate-50 rounded p-2">
+                  <div className="text-slate-500">Jardine 501 (2BR)</div>
+                  <div className="font-medium">{fmtMoney(jardine501.grossRent)} · 1,304 sqft</div>
+                  <div className="text-[10px] text-slate-500">no balcony · live-confirm availability</div>
+                </div>
+              )}
+              <div className="bg-amber-50 rounded p-2 col-span-2 lg:col-span-1">
+                <div className="text-amber-700 font-medium">Strategic adjustment</div>
+                <div>Jardine flagged <code>not_directly_comparable_to_baxter</code>. Excluded from rent anchoring; included in amenity / threat benchmarking only.</div>
+              </div>
+            </div>
+          </CardBody>
+        </Card>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {estimates.map(({ unit, est }) => (

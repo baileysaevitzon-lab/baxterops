@@ -9,6 +9,7 @@ const sections = [
       { href: "/", label: "Executive Dashboard" },
       { href: "/baxter-units", label: "Baxter Units" },
       { href: "/competitors", label: "Competitor Database" },
+      { href: "/competitor-intelligence", label: "Competitor Intelligence" },
       { href: "/comp-matching", label: "Comp Matching" },
       { href: "/pricing-model", label: "Pricing Model" },
       { href: "/photos-amenities", label: "Photos + Amenities" },
@@ -18,6 +19,7 @@ const sections = [
     label: "Field + Marketing",
     items: [
       { href: "/walkthrough-campaigns", label: "Walkthrough Campaigns" },
+      { href: "/add-tour", label: "Add Tour (new property)" },
       { href: "/local-partnerships", label: "Local Partnerships" },
       { href: "/marketing-roi", label: "Marketing ROI" },
       { href: "/lead-funnel", label: "Lead Funnel" },
@@ -49,6 +51,7 @@ const sections = [
       { href: "/reports", label: "Weekly Reports" },
       { href: "/audit-log", label: "Audit Log" },
       { href: "/settings", label: "Settings" },
+      { href: "/login", label: "Sign in / Auth" },
     ],
   },
 ];

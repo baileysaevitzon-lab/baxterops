@@ -5,6 +5,7 @@ import { RoleProvider } from "@/components/RoleProvider";
 import TopBar from "@/components/TopBar";
 import ZenSeedBootstrap from "@/components/ZenSeedBootstrap";
 import { SourceLedgerProvider } from "@/components/SourceLedgerProvider";
+import { AuthProvider } from "@/components/AuthProvider";
 
 export const metadata: Metadata = {
   title: "BaxterOps — Competitive Intelligence + Recertification",
@@ -15,6 +16,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="en">
       <body>
+        <AuthProvider>
         <RoleProvider>
           <ZenSeedBootstrap />
           <SourceLedgerProvider>
@@ -27,6 +29,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           </div>
           </SourceLedgerProvider>
         </RoleProvider>
+        </AuthProvider>
       </body>
     </html>
   );

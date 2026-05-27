@@ -139,7 +139,9 @@ export function RoleSwitcher({ compact = false }: { compact?: boolean }) {
   const { user, setUserId } = useRole();
   return (
     <div className={compact ? "text-xs" : "text-sm"}>
-      <label className="text-slate-500 mr-2">Acting as</label>
+      <label className="text-slate-500 mr-2" title="UI PREVIEW ONLY — does not change Supabase RLS. Real permissions come from your authenticated user_profiles.role.">
+        UI preview as
+      </label>
       <select
         value={user.id}
         onChange={e => setUserId(e.target.value)}

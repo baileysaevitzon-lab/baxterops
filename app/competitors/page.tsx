@@ -25,6 +25,7 @@ const SOURCE_LABEL: Record<NonNullable<CompetitorProperty["sourceType"]>, string
   zumper: "Zumper",
   google_business: "Google Business",
   other_listing: "Other listing",
+  field_tour: "Field tour",
   unverified: "Unverified",
 };
 

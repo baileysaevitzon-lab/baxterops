@@ -136,6 +136,11 @@ export default function CompMatching() {
                     <td>
                       <div className="font-medium">{o.competitorName}</div>
                       <div className="text-xs"><Badge intent="bad">premium amenity comp</Badge></div>
+                      {o.competitorId === "c-jardine" && (
+                        <div className="text-[10px] text-amber-700 mt-1">
+                          ⚠ Premium / luxury tier — use for threat + amenity benchmarking, NOT price anchoring.
+                        </div>
+                      )}
                     </td>
                     <td className="font-medium">{o.unitNumber}</td>
                     <td>{o.squareFeet ?? "—"}</td>

@@ -1,6 +1,7 @@
 "use client";
 import { Card, CardBody, CardHeader, PageHeader, Stat, Badge } from "@/components/Card";
 import { SourceBadge } from "@/components/SourceBadge";
+import { DashboardPhotoUpload } from "@/components/DashboardPhotoUpload";
 import { BAXTER_UNITS, COMPETITORS, MARKETING_SOURCES, TENANTS, WALKTHROUGH_TOURS } from "@/lib/seed";
 import { useRole } from "@/components/RoleProvider";
 import {
@@ -85,6 +86,11 @@ export default function Dashboard() {
         title="Executive Dashboard"
         subtitle="Baxter vs Hollywood comp snapshot · 2026-05-26 call-around. The headline problem is traffic, not price."
       />
+
+      {/* Sprint 7 — photo upload widget */}
+      <div className="mb-6">
+        <DashboardPhotoUpload />
+      </div>
 
       {/* Top stat row */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
@@ -227,7 +233,7 @@ export default function Dashboard() {
                 <div>
                   <div className="font-medium">
                     {canSensitive
-                      ? "Escalate Yolanda Benning LAHD compliance to Catherine."
+                      ? "Escalate the LAHD compliance case to Catherine (admin/manager only — see tenant_private_details)."
                       : "Escalate 1 affordable-unit LAHD compliance case to Catherine."}
                   </div>
                   <div className="text-slate-500 text-xs">

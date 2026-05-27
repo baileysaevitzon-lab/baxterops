@@ -47,7 +47,7 @@ export default function Reports() {
     // Internal vs owner-safe rendering of the escalation line:
     const escalationLine = ownerSafe || !canSeeInternal
       ? `• ${escalations} affordable-unit escalation(s) requires Catherine/HACLA review.`
-      : `• Yolanda Benning escalation requires Catherine/HACLA review (tenant rent $1,900 vs LAHD $1,000 cap).`;
+      : `• 1 affordable-unit LAHD escalation requires Catherine/HACLA review (case detail in tenant_private_details — Admin/Manager only).`;
 
     // Net effective rent example for 105
     const u105 = BAXTER_UNITS.find(u => u.id === "u-105");
@@ -86,6 +86,15 @@ ZEN HOLLYWOOD FIELD TOUR FINDINGS (2026-05-26, Bailey)
 • Concessions: 1 month free standard; $1,000 look-and-lease within 72hr; up to 8 weeks / 2 months free on 19-month lease with approved credit, select units.
 • Utilities: water included; power/gas/internet not included.
 • Strategic takeaway: Zen is a premium amenity threat. Baxter should compete through NER/value, speed, transparency, better photos, and lead conversion — not by matching gross rent or amenity package.
+
+JARDINE FIELD TOUR FINDINGS (2026-05-27, Bailey)
+• Jardine appears materially more amenitized and luxury-positioned than Baxter, with low availability and no specials. Treat as a premium nearby threat, not a clean direct comp.
+• Observed units (Bailey tour): 504 (1BR / 583 sqft / $3,155 / no balcony); 501 (2BR / 1,304 sqft / $5,295 / no balcony).
+• Fees: parking $150/mo (separate); application $55/person; holding $500 (10-14 day hold).
+• Amenities: gym, rooftop, rooftop pool, theater (paid rental), garden room, pool clubhouse (paid rental), 24/7 security, manual scent control on every floor, coffee offered, strong luxury interior + exterior.
+• No specials due to low vacancy; prices subject to daily change.
+• Verification needed: live availability count for 504/501, pest control fee amount, other monthly fee amount, theater rental rate, clubhouse rental rate, listing-source check (Apartments.com / Zillow / RentCafe).
+• Strategic takeaway: Jardine is a premium amenity comp. Use for threat / amenity benchmarking. Do NOT use Jardine rents as a Baxter rent anchor — the product tier is different.
 
 CONCESSION POSITIONING
 • Baxter: 1st month free on select units = weakest in comp set.
