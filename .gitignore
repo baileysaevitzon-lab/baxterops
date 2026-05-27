@@ -1,0 +1,16 @@
+node_modules
+.next
+out
+.DS_Store
+*.log
+
+# environment / secrets — never commit
+.env
+.env.local
+.env.*.local
+.env.development.local
+.env.production.local
+
+# build / cache
+public/zen-tour/converted/
+*.tsbuildinfo
