@@ -5,9 +5,10 @@
 // Tracks every restricted-unit household from "needs cert" → "approved."
 // No real tenant SSNs / sensitive income / real private notes in this file.
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { Card, CardBody, CardHeader, PageHeader, Badge } from "@/components/Card";
+import { useAuth } from "@/components/AuthProvider";
 import { getAllCases } from "@/lib/services/recertification";
 import type { RecertCaseStatus, RecertificationCase, RecertRiskLevel } from "@/lib/types";
 
@@ -87,17 +88,37 @@ type FilterState = {
 };
 
 export default function RecertificationCenter() {
+  const { signedIn, loading: authLoading } = useAuth();
   const [cases, setCases] = useState<RecertificationCase[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [selectedCase, setSelectedCase] = useState<RecertificationCase | null>(null);
   const [filter, setFilter] = useState<FilterState>({
     status: "all", certType: "all", riskLevel: "all",
     incomeStatus: "all", rentStatus: "all", search: "",
   });
 
-  useEffect(() => {
-    getAllCases().then(c => { setCases(c); setLoading(false); });
+  const loadCases = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const c = await getAllCases();
+      setCases(c);
+    } catch (e) {
+      // persistence.list() normally swallows query errors and returns [], but a
+      // missing Supabase client or a network throw can still reject. Surface the
+      // cause in a banner instead of hanging forever on "Loading cases…".
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setLoading(false);
+    }
   }, []);
+
+  useEffect(() => {
+    if (authLoading) return;                         // wait until auth resolves
+    if (!signedIn) { setLoading(false); return; }    // signed-out → gate below
+    loadCases();
+  }, [authLoading, signedIn, loadCases]);
 
   // Stat cards
   const stats = useMemo(() => {
@@ -128,7 +149,31 @@ export default function RecertificationCenter() {
     return true;
   }), [cases, filter]);
 
+  if (authLoading) return <p className="p-8 text-sm text-slate-500">Loading…</p>;
+  if (!signedIn) return (
+    <div className="p-8 max-w-lg">
+      <h1 className="text-xl font-semibold text-slate-900">Sign in required</h1>
+      <p className="text-sm text-slate-600 mt-2">
+        The Recertification Center reads live case data from Supabase. Sign in to view and manage tenant certifications.
+      </p>
+      <Link href="/login" className="inline-block mt-4 px-4 py-2 rounded bg-slate-900 text-white text-sm font-semibold hover:bg-slate-700">
+        Sign in →
+      </Link>
+    </div>
+  );
   if (loading) return <p className="p-8 text-sm text-slate-500">Loading cases…</p>;
+  if (error) return (
+    <div className="p-8 max-w-lg">
+      <div className="rounded-md border border-rose-300 bg-rose-50 px-4 py-3">
+        <h1 className="text-sm font-semibold text-rose-900">Could not load recertification cases</h1>
+        <p className="text-xs text-rose-800 mt-1 font-mono break-words">{error}</p>
+        <p className="text-xs text-rose-700 mt-2">This usually means the Supabase connection failed or your session expired.</p>
+      </div>
+      <button onClick={loadCases} className="inline-block mt-4 px-4 py-2 rounded bg-slate-900 text-white text-sm font-semibold hover:bg-slate-700">
+        Retry
+      </button>
+    </div>
+  );
 
   return (
     <>
@@ -136,12 +181,37 @@ export default function RecertificationCenter() {
         title="Recertification Center"
         subtitle="Track tenant certifications, collect documents, calculate income/assets, check rent compliance, and prepare complete LAHD/Urban Futures submission packets."
         action={
-          <div className="text-xs text-slate-500 bg-amber-50 border border-amber-200 rounded-md px-3 py-2 max-w-sm">
-            <strong>⚠ IMPORTANT:</strong> Tenant cannot move in until certification package is complete and approved. Incomplete packages will not be reviewed. Determination takes up to 10 business days after complete submission.
+          <div className="flex flex-col gap-2 items-end">
+            <Link href="/recertification/roster" className="inline-block px-4 py-2 rounded bg-slate-900 text-white text-xs font-semibold shadow-sm hover:bg-slate-700">
+              📋 Tenant Roster &amp; Invitations →
+            </Link>
+            <div className="text-xs text-slate-500 bg-amber-50 border border-amber-200 rounded-md px-3 py-2 max-w-sm">
+              <strong>⚠ IMPORTANT:</strong> Tenant cannot move in until certification package is complete and approved. Incomplete packages will not be reviewed. Determination takes up to 10 business days after complete submission.
+            </div>
           </div>
         }
       />
 
+      {cases.length === 0 ? (
+        <div className="rounded-lg border border-slate-200 bg-white p-8 text-center max-w-2xl">
+          <div className="text-3xl mb-2">📭</div>
+          <h2 className="text-lg font-semibold text-slate-900">No recertification cases yet</h2>
+          <p className="text-sm text-slate-600 mt-2">
+            You&apos;re signed in, but there are no cases in Supabase yet. Start one from a seeded
+            tenant on the roster — that creates the case and pre-fills the LAHD packet with the
+            tenant&apos;s name and unit.
+          </p>
+          <div className="mt-4 flex gap-2 justify-center">
+            <Link href="/recertification/roster" className="px-4 py-2 rounded bg-slate-900 text-white text-sm font-semibold hover:bg-slate-700">
+              📋 Open Tenant Roster →
+            </Link>
+            <button onClick={loadCases} className="px-4 py-2 rounded border border-slate-300 text-sm text-slate-700 bg-white hover:bg-slate-50">
+              Refresh
+            </button>
+          </div>
+        </div>
+      ) : (
+      <>
       {/* Status cards */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 mb-6">
         {[
@@ -358,6 +428,8 @@ export default function RecertificationCenter() {
           </div>
         )}
       </div>
+      </>
+      )}
 
       <p className="text-[11px] text-slate-400 mt-6">
         Data from Supabase <code>recertification_cases</code>. Submit complete packages to Urban Futures Bond Administration at <code>cert@ufbahc.com</code>. Manager remains responsible for all income calculations and eligibility determinations. Label all outputs as "manager review required."

@@ -31,6 +31,9 @@ export const TABLES = {
   recertAiReviews: "recert_ai_reviews",
   recertClarificationRequests: "recert_clarification_requests",
   recertAuditEvents: "recert_audit_events",
+  // Sprint 19 — tenant roster (eligible / blocked list + lifecycle)
+  recertTenantRoster: "recert_tenant_roster",
+  recertCompletionSessions: "recert_completion_sessions",
 } as const;
 
 export type TableName = (typeof TABLES)[keyof typeof TABLES];

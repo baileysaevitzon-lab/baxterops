@@ -1520,6 +1520,63 @@ function SubmissionTab({
 
   return (
     <div className="space-y-6">
+      {/* Sprint 18 — Completion Portals: guided HTML forms → merge → final PDF */}
+      <div className="rounded-xl border-2 border-emerald-300 bg-emerald-50 px-4 py-4">
+        <div className="flex items-start justify-between gap-4 flex-wrap">
+          <div>
+            <h3 className="text-base font-bold text-emerald-900">📝 Completion Portals (HTML → final PDF)</h3>
+            <p className="text-xs text-emerald-800 mt-1 max-w-2xl">
+              Send the tenant a simple guided HTML form (only the questions they need to answer). Manager
+              completes a separate manager form. Both sets of answers merge back into the official LAHD PDF
+              using the original AcroForm field names — no double data entry, no layout redesign.
+            </p>
+            <p className="text-[11px] text-emerald-700 italic mt-1">
+              Manager review still required. Signature protections from Sprint 16 still apply.
+            </p>
+          </div>
+          <div className="flex gap-2 flex-wrap">
+            <a
+              href={`/recertification/${recertCase.id}/tenant-completion`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-white text-sm font-semibold rounded-lg"
+            >
+              Open Tenant Completion Form →
+            </a>
+            <a
+              href={`/recertification/${recertCase.id}/manager-completion`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-white text-sm font-semibold rounded-lg"
+            >
+              Open Manager Completion Form →
+            </a>
+            <a
+              href={`/recertification/${recertCase.id}/exact-form-preview`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="px-4 py-2 bg-white border-2 border-emerald-400 text-emerald-800 text-sm rounded-lg hover:bg-emerald-100"
+            >
+              Preview Final Official PDF
+            </a>
+            <a
+              href={`/api/recertification/${recertCase.id}/generate-exact-form`}
+              className="px-4 py-2 bg-white border-2 border-emerald-400 text-emerald-800 text-sm rounded-lg hover:bg-emerald-100"
+              download={`lahd-recert-final-${recertCase.id}.pdf`}
+            >
+              Download Final PDF
+            </a>
+            {/* Sprint 19 — Roster invitations + lifecycle tracking */}
+            <a
+              href="/recertification/roster"
+              className="px-4 py-2 bg-white border-2 border-emerald-400 text-emerald-800 text-sm rounded-lg hover:bg-emerald-100"
+            >
+              📋 Tenant Roster &amp; Invitations
+            </a>
+          </div>
+        </div>
+      </div>
+
       {/* Sprint 15 — Exact-form fill: PRIMARY tenant-facing deliverable */}
       <div className="rounded-xl border-2 border-sky-300 bg-sky-50 px-4 py-4">
         <div className="flex items-start justify-between gap-4 flex-wrap">

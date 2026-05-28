@@ -55,6 +55,16 @@ export interface FillContext {
   managerName?: string;
   managerTitle?: string;
   managerEmail?: string;
+  /**
+   * Sprint 16: per-case classification overrides keyed by PDF field name.
+   * If an override exists for a field, its fillStatus + manualOverrideValue
+   * supersede the in-code defaults.
+   */
+  overrides?: Map<string, {
+    fillStatus?: FillStatus;
+    manualOverrideValue?: string;
+    notes?: string;
+  }>;
 }
 
 // ---------- Helpers ----------
@@ -226,6 +236,32 @@ export function resolveLahdRecert2026Fields(ctx: FillContext): FieldFillResult[]
   // Note: all 12-XX through 15-XX TICQ questions (Y/N buttons and Info/Monthly
   // text fields) are tenant-completed and intentionally OMITTED from this map.
   // Same for 6-XX asset table rows. Same for /Sig signature fields.
+
+  // Sprint 16: apply per-case overrides. Bailey edits these via the Field
+  // Classification tab on /exact-form-preview; they supersede the defaults.
+  if (ctx.overrides && ctx.overrides.size > 0) {
+    for (const result of out) {
+      const ov = ctx.overrides.get(result.fieldName);
+      if (!ov) continue;
+      if (ov.fillStatus) {
+        result.status = ov.fillStatus;
+        // If override moves field away from filled_known, clear any auto-filled value.
+        if (ov.fillStatus !== "filled_known") {
+          result.value = undefined;
+        }
+      }
+      // Manual override value wins when present.
+      if (ov.manualOverrideValue !== undefined && ov.manualOverrideValue !== "") {
+        result.value = ov.manualOverrideValue;
+        // If the override carries a value but no fillStatus, treat it as filled_known.
+        if (!ov.fillStatus) result.status = "filled_known";
+      }
+      if (ov.notes) result.notes = ov.notes;
+      if (result.status === "filled_known" && result.value) {
+        result.confidence = "medium";   // manual overrides are medium-confidence
+      }
+    }
+  }
 
   return out;
 }

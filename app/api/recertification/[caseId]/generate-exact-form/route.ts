@@ -10,7 +10,7 @@
 // DocHub on iPad.
 
 import { NextResponse, type NextRequest } from "next/server";
-import { PDFDocument, PDFTextField, PDFCheckBox, PDFRadioGroup } from "pdf-lib";
+import { PDFDocument, PDFTextField, PDFCheckBox, PDFRadioGroup, PDFSignature } from "pdf-lib";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { createClient } from "@supabase/supabase-js";
@@ -19,6 +19,7 @@ import {
   TENANT_ONLY_FIELD_PREFIXES,
   SIGNATURE_FIELD_NAMES,
   type FieldFillResult,
+  type FillStatus,
 } from "@/lib/services/recertExactFormFill";
 
 export const runtime = "nodejs";
@@ -50,13 +51,14 @@ export async function POST(
   const sb = getServerSupabase(req);
   if (!sb) return NextResponse.json({ error: "Supabase not configured" }, { status: 500 });
 
-  // Load case + members + income + assets + UA
-  const [caseRow, membersRow, incomeRow, assetsRow, uaRow] = await Promise.all([
+  // Load case + members + income + assets + UA + Sprint 16 per-case overrides
+  const [caseRow, membersRow, incomeRow, assetsRow, uaRow, overridesRow] = await Promise.all([
     sb.from("recertification_cases").select("*").eq("id", caseId).maybeSingle(),
     sb.from("recert_household_members").select("*").eq("case_id", caseId).order("is_adult", { ascending: false }),
     sb.from("recert_income_sources").select("*").eq("case_id", caseId),
     sb.from("recert_asset_accounts").select("*").eq("case_id", caseId),
     sb.from("recert_utility_allowance").select("*").eq("case_id", caseId).maybeSingle(),
+    sb.from("recert_case_field_overrides").select("*").eq("case_id", caseId).eq("template_id", TEMPLATE_ID),
   ]);
 
   if (caseRow.error || !caseRow.data) {
@@ -132,6 +134,22 @@ export async function POST(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const ua = (uaRow.data ?? undefined) as any;
 
+  // Build the Sprint 16 override map for the resolver.
+  const overrideRows = (overridesRow.data ?? []) as Array<{
+    field_name: string;
+    fill_status: string | null;
+    manual_override_value: string | null;
+    notes: string | null;
+  }>;
+  const overrides = new Map<string, { fillStatus?: FillStatus; manualOverrideValue?: string; notes?: string }>();
+  for (const r of overrideRows) {
+    overrides.set(r.field_name, {
+      fillStatus: (r.fill_status as FillStatus | null) ?? undefined,
+      manualOverrideValue: r.manual_override_value ?? undefined,
+      notes: r.notes ?? undefined,
+    });
+  }
+
   const fillResults: FieldFillResult[] = resolveLahdRecert2026Fields({
     recertCase,
     members,
@@ -141,6 +159,7 @@ export async function POST(
     managerName,
     managerTitle,
     managerEmail,
+    overrides,
   });
 
   // Load template PDF
@@ -174,9 +193,177 @@ export async function POST(
     }
   }
 
-  // Important: do NOT flatten or touch tenant-only fields and signatures.
+  // Sprint 18 (pivot): merge tenant + manager HTML completion responses.
+  // Each row in recert_packet_field_values with packet_id IN ('tenant_completion','manager_completion')
+  // is keyed by the original PDF AcroForm field name. We apply text values
+  // directly, expand yesno into Y/N checkbox pairs via the stored
+  // resolverPair, and surface a count for the manifest.
+  //
+  // Sprint 19: each child follow-up row stores its parentFieldName +
+  // parentTriggerValue in value_json. Before writing the row we look up the
+  // parent's stored answer. If the parent != trigger (e.g. tenant flipped Yes
+  // → No), we SKIP the child. This prevents stale answers from leaking onto
+  // the final PDF after a Yes-then-No flip — even if our delete-on-flip path
+  // in the UI didn't catch every orphan.
+  let completionsApplied = 0;
+  let orphansSkipped = 0;
+  try {
+    const { data: completionRows } = await sb
+      .from("recert_packet_field_values")
+      .select("packet_id, field_key, value_text, value_json, filled_by_role")
+      .eq("case_id", caseId)
+      .in("packet_id", ["tenant_completion", "manager_completion"]);
+
+    const allRows = (completionRows ?? []) as Array<{
+      packet_id: string; field_key: string; value_text: string | null;
+      value_json: Record<string, unknown> | null; filled_by_role: string | null;
+    }>;
+
+    // Build (packet_id, field_key) → value_text lookup so we can resolve parent
+    // answers in O(1). A child and its parent always share the same packet_id.
+    const answerByPacket = new Map<string, Map<string, string>>();
+    for (const r of allRows) {
+      let bucket = answerByPacket.get(r.packet_id);
+      if (!bucket) { bucket = new Map(); answerByPacket.set(r.packet_id, bucket); }
+      bucket.set(r.field_key, r.value_text ?? "");
+    }
+
+    for (const row of allRows) {
+      const fieldKey = row.field_key;
+      const value = row.value_text;
+      if (value == null || value === "") continue;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const meta = row.value_json as any;
+      const fieldType = meta?.fieldType as string | undefined;
+      const resolverPair = meta?.resolverPair as { yes?: string; no?: string } | undefined;
+      const parentFieldName = meta?.parentFieldName as string | undefined;
+      const parentTriggerValue = meta?.parentTriggerValue as string | undefined;
+
+      // Sprint 19 orphan guard: skip child whose parent isn't at trigger.
+      if (parentFieldName && parentTriggerValue) {
+        const parentAnswer = answerByPacket.get(row.packet_id)?.get(parentFieldName) ?? "";
+        if (parentAnswer !== parentTriggerValue) {
+          orphansSkipped += 1;
+          continue;
+        }
+      }
+
+      try {
+        // Compound controls
+        if (fieldType === "yesno" && resolverPair) {
+          const yesAnswer = value === "yes";
+          for (const [answer, fname] of [[true, resolverPair.yes], [false, resolverPair.no]] as const) {
+            if (!fname) continue;
+            try {
+              const f = form.getField(fname);
+              if (f instanceof PDFCheckBox) { (answer === yesAnswer) ? f.check() : f.uncheck(); completionsApplied += 1; }
+              else if (f instanceof PDFTextField) { if (answer === yesAnswer) { f.setText("X"); completionsApplied += 1; } }
+            } catch { /* field absent — skip */ }
+          }
+          continue;
+        }
+        // Signature fields: handled by Sprint 17 PNG overlay; skip here.
+        if (fieldType === "signature") continue;
+        // Initial: fan out single-input to 11-Initial1..7 if this is the canonical initials field
+        if (fieldType === "initial" && /^11-Initial[1-9]$/.test(fieldKey)) {
+          for (let i = 1; i <= 7; i++) {
+            try {
+              const f = form.getField(`11-Initial${i}`);
+              if (f instanceof PDFTextField) { f.setText(value); completionsApplied += 1; }
+            } catch { /* skip */ }
+          }
+          continue;
+        }
+        // Generic text-style fields
+        const f = form.getField(fieldKey);
+        if (f instanceof PDFTextField) { f.setText(value); completionsApplied += 1; }
+        else if (f instanceof PDFCheckBox) {
+          if (value === "true" || value === "yes" || value === "1") { f.check(); completionsApplied += 1; }
+          else { f.uncheck(); }
+        }
+      } catch (e) {
+        console.warn(`[exact-form] could not merge completion response for ${fieldKey}:`, e instanceof Error ? e.message : e);
+      }
+    }
+  } catch (e) {
+    console.warn("[exact-form] completion-merge step failed (non-fatal):", e);
+  }
+
+  // Sprint 17: overlay typed-signature PNGs at /Sig widget positions.
+  // Tenant captured their typed signature via /exact-form-preview Classification
+  // tab; PNGs live in recert_packet_signatures keyed by section_key. We look up
+  // each tenant /Sig widget's rectangle, embed the PNG, and drawImage at the
+  // widget's coords on the corresponding page. The /Sig widget itself stays
+  // intact — DocHub still recognizes it for in-person fallback.
+  let signatureOverlays = 0;
+  try {
+    const { data: sigRows } = await sb
+      .from("recert_packet_signatures")
+      .select("section_key, signer_role, signature_data_url, signed_at")
+      .eq("case_id", caseId)
+      .eq("packet_id", "exact_form")
+      .eq("signer_role", "tenant");
+
+    // section_key → list of /Sig field names that section corresponds to
+    const sectionToSigFields: Record<string, string[]> = {
+      applicant_statement: ["11-HouseholdMemberSignature"],
+      conflict_of_interest: ["16-HHMbrSignature"],
+    };
+
+    for (const row of (sigRows ?? []) as Array<{ section_key: string; signature_data_url: string }>) {
+      const targetFields = sectionToSigFields[row.section_key] ?? [];
+      const dataUrl = row.signature_data_url;
+      if (!dataUrl?.startsWith("data:image/png;base64,")) continue;
+      const pngBytes = Buffer.from(dataUrl.slice("data:image/png;base64,".length), "base64");
+      const embeddedImage = await pdfDoc.embedPng(pngBytes);
+
+      for (const fieldName of targetFields) {
+        try {
+          const field = form.getField(fieldName);
+          if (!(field instanceof PDFSignature)) continue;
+          // Get the field's widget annotations to find page + rectangle.
+          // PDFSignature exposes acroField + widget array via internal API.
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const widgets = (field as any).acroField.getWidgets() as Array<{
+            getRectangle: () => { x: number; y: number; width: number; height: number };
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            P: () => any;
+          }>;
+          for (const widget of widgets) {
+            const rect = widget.getRectangle();
+            // Find the page containing this widget annotation.
+            const pageRef = widget.P();
+            const pages = pdfDoc.getPages();
+            const page = pages.find(p => p.ref === pageRef) ?? pages.find(p => {
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              const annots = (p.node as any).Annots?.();
+              return annots?.array?.some?.((a: { tag?: number }) => a.tag === pageRef?.tag);
+            });
+            if (!page) continue;
+            // drawImage at the widget rect, leaving a small inset so the image
+            // doesn't bleed past the underline below the widget.
+            const inset = 2;
+            page.drawImage(embeddedImage, {
+              x: rect.x + inset,
+              y: rect.y + inset,
+              width: rect.width - inset * 2,
+              height: rect.height - inset * 2,
+            });
+            signatureOverlays += 1;
+          }
+        } catch (e) {
+          console.warn(`[exact-form] could not overlay signature at ${fieldName}:`, e instanceof Error ? e.message : e);
+        }
+      }
+    }
+  } catch (e) {
+    console.warn("[exact-form] signature overlay step failed (non-fatal):", e);
+  }
+
+  // Important: do NOT flatten or touch the still-blank tenant-only fields.
   // Leave them as empty AcroForm widgets so DocHub on iPad treats them as
-  // fillable / signable.
+  // fillable. Signature widgets stay intact too — the overlaid PNG is drawn
+  // on top but the widget metadata is preserved so DocHub still sees them.
   void TENANT_ONLY_FIELD_PREFIXES;
   void SIGNATURE_FIELD_NAMES;
 
@@ -208,6 +395,11 @@ export async function POST(
         blank_missing_data: blankMissing,
         blank_pending_external: blankPending,
         needs_review: needsReview,
+        signature_overlays: signatureOverlays,
+        completions_applied: completionsApplied,
+        // Sprint 19: count of child follow-ups whose parent flipped away
+        // from the trigger answer, so they were skipped at merge time.
+        orphans_skipped: orphansSkipped,
         results: fillResults,
       },
       status: "draft",
@@ -216,9 +408,26 @@ export async function POST(
       id: `ae-${packetId}`,
       case_id: caseId,
       event_type: "exact_form_fill_generated",
-      summary: `Exact-form PDF generated: ${filledKnown} fields filled · ${blankTenant} tenant-blank · ${blankManager} manager-blank · ${blankPending} HACLA-pending`,
-      created_by: managerName ?? "unknown",
+      event_summary: `Exact-form PDF generated: ${filledKnown} fields filled · ${blankTenant} tenant-blank · ${blankManager} manager-blank · ${blankPending} HACLA-pending`,
+      actor_email: managerEmail ?? null,
+      event_payload_json: { packetId, templateId: TEMPLATE_ID, filledKnown, blankTenant, blankManager, blankPending, needsReview, completionsApplied, orphansSkipped },
     });
+
+    // Sprint 19: advance the roster lifecycle for this case to "merged" so
+    // management sees the final PDF was generated. Best-effort; ignored if
+    // no roster entry points to this case.
+    try {
+      await sb
+        .from("recert_tenant_roster")
+        .update({
+          final_pdf_generated_at: new Date().toISOString(),
+          status: "merged",
+          updated_at: new Date().toISOString(),
+        })
+        .eq("case_id", caseId);
+    } catch (e) {
+      console.warn("[exact-form] roster lifecycle update failed (non-fatal):", e);
+    }
   } catch (e) {
     console.warn("[exact-form] audit write failed (non-fatal):", e);
   }
@@ -235,6 +444,8 @@ export async function POST(
       "X-Packet-Id": packetId,
       "X-Filled-Count": String(filledKnown),
       "X-Blank-Count": String(blankTenant + blankManager + blankMissing + blankPending),
+      "X-Completions-Applied": String(completionsApplied),
+      "X-Orphans-Skipped": String(orphansSkipped),
     },
   });
 }
