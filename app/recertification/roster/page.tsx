@@ -25,6 +25,7 @@ import {
   describeStatus,
   type RosterEntry,
 } from "@/lib/services/recertTenantRoster";
+import { buildTenantOfflineHtml } from "@/lib/services/recertOfflineForm";
 
 type Tab = "eligible" | "blocked";
 
@@ -38,6 +39,7 @@ export default function RosterPage() {
   const [newName, setNewName] = useState("");
   const [newUnit, setNewUnit] = useState("");
   const [adding, setAdding] = useState(false);
+  const [downloadedFor, setDownloadedFor] = useState<string | null>(null);
 
   // Initial load
   useEffect(() => {
@@ -104,6 +106,34 @@ export default function RosterPage() {
     setBusyId(null);
   }
 
+  async function handleDownloadOfflineForm(entry: RosterEntry) {
+    setBusyId(entry.id); setError(null); setDownloadedFor(null);
+    let caseId = entry.caseId;
+    if (!caseId) {
+      const startRes = await startRecertificationFor(entry.id);
+      if (!startRes.ok || !startRes.caseId) {
+        setBusyId(null); setError(startRes.error ?? "Could not start case"); return;
+      }
+      caseId = startRes.caseId;
+      const fresh = await loadRoster();
+      setRoster(fresh);
+    }
+    try {
+      const built = await buildTenantOfflineHtml(caseId);
+      if (!built) { setBusyId(null); setError("Could not build the form — case not found."); return; }
+      const blob = new Blob([built.html], { type: "text/html;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url; a.download = built.filename;
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 1500);
+      setDownloadedFor(entry.tenantName);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Download failed");
+    }
+    setBusyId(null);
+  }
+
   async function handleAddTenant() {
     if (!newName.trim() || !newUnit.trim()) { setError("Name + unit are required"); return; }
     setAdding(true); setError(null);
@@ -131,8 +161,8 @@ export default function RosterPage() {
         <Link href="/recertification" className="text-xs text-slate-500 underline">← Recertification Command Center</Link>
         <h1 className="text-2xl font-bold text-slate-900 mt-1">Tenant Roster</h1>
         <p className="text-sm text-slate-600 mt-1">
-          Pick a tenant → start a recertification case → copy the tenant completion link.
-          Status updates automatically when the tenant opens / submits the form.
+          Pick a tenant → click <strong>Download form ↓</strong> → email the <code>.html</code> file to the tenant.
+          They fill it out in Chrome or Safari and email it back. Open the case to import their answers.
         </p>
       </div>
 
@@ -149,10 +179,18 @@ export default function RosterPage() {
         <div className="mb-4 rounded-md border border-rose-300 bg-rose-50 px-4 py-2 text-sm text-rose-900">{error}</div>
       )}
 
-      {copied && (
+      {downloadedFor && (
         <div className="mb-4 rounded-md border border-emerald-300 bg-emerald-50 px-4 py-2 text-sm text-emerald-900">
-          ✓ Link copied to clipboard for <strong>{roster.find(r => r.id === copied.id)?.tenantName}</strong>.<br />
-          <code className="font-mono text-xs break-all">{copied.url}</code>
+          ✓ Downloaded form for <strong>{downloadedFor}</strong>.
+          Attach the <code className="font-mono text-xs">.html</code> file to an email and send it to the tenant.
+          When they return it, open the case and use <strong>Import returned form</strong>.
+        </div>
+      )}
+      {copied && (
+        <div className="mb-4 rounded-md border border-sky-200 bg-sky-50 px-4 py-2 text-sm text-sky-900">
+          ✓ Link copied for <strong>{roster.find(r => r.id === copied.id)?.tenantName}</strong>.{" "}
+          <span className="text-amber-700 font-medium">Note: this link only works when the app is deployed to a public server, not on localhost.</span><br />
+          <code className="font-mono text-xs break-all text-slate-600">{copied.url}</code>
         </div>
       )}
 
@@ -228,21 +266,22 @@ export default function RosterPage() {
                       <span className="text-xs text-slate-400 italic">No actions available</span>
                     ) : (
                       <div className="flex flex-wrap gap-2">
-                        {!entry.caseId && (
-                          <button
-                            onClick={() => handleStartRecert(entry)}
-                            disabled={busyId === entry.id}
-                            className="px-3 py-1.5 rounded bg-slate-900 text-white text-xs disabled:bg-slate-400"
-                          >
-                            {busyId === entry.id ? "…" : "Start Recertification"}
-                          </button>
-                        )}
+                        {/* Primary: download the offline HTML form to email to the tenant */}
                         <button
-                          onClick={() => handleCopyLink(entry)}
+                          onClick={() => handleDownloadOfflineForm(entry)}
                           disabled={busyId === entry.id}
                           className="px-3 py-1.5 rounded bg-emerald-700 text-white text-xs disabled:bg-slate-400"
                         >
-                          {busyId === entry.id ? "…" : (entry.invitationToken ? "Copy link again" : "Copy tenant link")}
+                          {busyId === entry.id ? "Building…" : "Download form ↓"}
+                        </button>
+                        {/* Secondary: hosted link (only useful when deployed to a public server) */}
+                        <button
+                          onClick={() => handleCopyLink(entry)}
+                          disabled={busyId === entry.id}
+                          className="px-3 py-1.5 rounded border border-slate-300 text-xs text-slate-500 bg-white disabled:opacity-40"
+                          title="Hosted link — only works when app is deployed to a public server, not on localhost"
+                        >
+                          {busyId === entry.id ? "…" : "Copy link"}
                         </button>
                         {entry.caseId && (
                           <Link href={`/recertification/${entry.caseId}`} className="px-3 py-1.5 rounded border border-slate-300 text-xs text-slate-700 bg-white">
@@ -260,7 +299,10 @@ export default function RosterPage() {
       </div>
 
       <p className="text-[11px] text-slate-500 mt-3">
-        Eligible / blocked status is configured at the table level. Blocked tenants cannot be issued invitation links.
+        <strong>Offline workflow (recommended):</strong> Download form → email the <code>.html</code> to the tenant →
+        they fill it out in Chrome/Safari and email it back → open the case → Import returned form.<br />
+        <strong>Hosted link</strong> (Copy link) only works when BaxterOps is deployed to a public URL, not on localhost.
+        Eligible / blocked status is configured at the table level.
       </p>
     </div>
   );
