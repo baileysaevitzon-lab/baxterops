@@ -350,9 +350,11 @@ export async function refreshRosterStatusFromSessions(): Promise<void> {
 // Public-facing helpers
 // ─────────────────────────────────────────────────────────────────────────────
 
-export function buildInvitationUrl(origin: string, caseId: string, token: string): string {
+export function buildInvitationUrl(origin: string, _caseId: string, token: string): string {
+  // Sprint 21: the public tenant form is token-gated at /recertification/tenant/[token].
+  // The caseId is no longer in the URL — the API route resolves it from the token.
   const cleanOrigin = origin.replace(/\/+$/, "");
-  return `${cleanOrigin}/recertification/${encodeURIComponent(caseId)}/tenant-completion?invite=${encodeURIComponent(token)}`;
+  return `${cleanOrigin}/recertification/tenant/${encodeURIComponent(token)}`;
 }
 
 export function describeStatus(s: RosterStatus): { label: string; tone: "slate" | "amber" | "blue" | "green" | "rose" | "violet" } {

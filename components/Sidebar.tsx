@@ -58,6 +58,8 @@ const sections = [
 
 export default function Sidebar() {
   const pathname = usePathname();
+  // Sprint 21: hide the staff sidebar on the public token-gated tenant form.
+  if (pathname?.startsWith("/recertification/tenant/")) return null;
   return (
     <aside className="w-64 shrink-0 border-r border-slate-200 bg-white min-h-screen">
       <div className="p-5 border-b border-slate-200">

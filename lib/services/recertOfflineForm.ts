@@ -224,6 +224,8 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Ar
 .btn-primary:hover{background:#1e293b}
 #save-state{font-size:12px;color:#475569}
 .legal{font-size:11px;color:#94a3b8;margin:18px 4px 0;line-height:1.5}
+.gmail-warn{border:2px solid #f59e0b;background:#fef3c7;border-radius:8px;padding:12px 14px;font-size:13px;margin:0 0 14px;color:#78350f}
+.gmail-warn strong{display:block;font-size:14px;font-weight:700;margin-bottom:4px}
 `;
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -461,8 +463,14 @@ export function renderTenantOfflineHtml(schema: CompletionFormSchema): string {
 </div>
 
 <div class="wrap">
+  <div class="gmail-warn">
+    <strong>&#x26A0; Seeing code or scrambled text?</strong>
+    Your email app may be showing the raw file instead of the form.
+    Please <strong>save this attachment to your device</strong>, then open it in Chrome, Safari, or Firefox.
+    The form works fully offline once open &#x2014; no internet needed.
+  </div>
   <div class="banner">
-    <strong>How this works.</strong> Fill out the form below on your own device — no internet needed.
+    <strong>How this works.</strong> Fill out the form below on your own device &#x2014; no internet needed.
     When you are done, tap <strong>Download my filled form</strong> at the bottom and email the saved
     file back to your property manager. Your answers stay on your device until you send the file.
   </div>
