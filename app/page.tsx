@@ -2,7 +2,11 @@
 import { Card, CardBody, CardHeader, PageHeader, Stat, Badge } from "@/components/Card";
 import { SourceBadge } from "@/components/SourceBadge";
 import { DashboardPhotoUpload } from "@/components/DashboardPhotoUpload";
-import { BAXTER_UNITS, COMPETITORS, MARKETING_SOURCES, TENANTS, WALKTHROUGH_TOURS } from "@/lib/seed";
+import { BAXTER_UNITS, COMPETITORS as SEED_COMPETITORS, MARKETING_SOURCES, TENANTS, WALKTHROUGH_TOURS } from "@/lib/seed";
+import { useCompetitors } from "@/lib/hooks/useCompetitors";
+import { useTouredIds } from "@/lib/hooks/useTouredIds";
+import { useTouredOnly } from "@/lib/hooks/useTouredOnly";
+import { TouredOnlyToggle } from "@/components/TouredOnlyToggle";
 import { useRole } from "@/components/RoleProvider";
 import {
   compAverageLeased,
@@ -34,6 +38,14 @@ export default function Dashboard() {
   const canSensitive = can("view_sensitive_tenant");
   const vacantUnits = BAXTER_UNITS.filter(u => u.occupancy === "vacant");
   const monthlyVacancyLoss = vacancyLoss(BAXTER_UNITS);
+
+  // Sprint 13: live competitor list + Toured-Only filter.
+  const { competitors: ALL_COMPETITORS } = useCompetitors();
+  const { touredIds, touredCount } = useTouredIds();
+  const [touredOnly, setTouredOnly] = useTouredOnly();
+  // Use seed fallback if live list is empty (e.g. signed-out path) so dashboard never blanks.
+  const baseList = ALL_COMPETITORS.length > 0 ? ALL_COMPETITORS : SEED_COMPETITORS;
+  const COMPETITORS = touredOnly ? baseList.filter(c => touredIds.has(c.id)) : baseList;
 
   const compOcc = compAverageOccupancy(COMPETITORS);
   const compLeased = compAverageLeased(COMPETITORS);
@@ -84,7 +96,15 @@ export default function Dashboard() {
     <>
       <PageHeader
         title="Executive Dashboard"
-        subtitle="Baxter vs Hollywood comp snapshot · 2026-05-26 call-around. The headline problem is traffic, not price."
+        subtitle={`Baxter vs Hollywood comp snapshot · 2026-05-26 call-around. The headline problem is traffic, not price.${touredOnly ? " · Comp metrics use field-toured properties only." : ""}`}
+        action={
+          <TouredOnlyToggle
+            on={touredOnly}
+            onToggle={setTouredOnly}
+            touredCount={touredCount}
+            totalCount={baseList.length}
+          />
+        }
       />
 
       {/* Sprint 7 — photo upload widget */}

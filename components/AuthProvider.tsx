@@ -61,12 +61,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     sb.auth.getSession().then(({ data }) => {
       setSession(data.session);
       if (data.session?.user) refreshProfile(data.session.user.id);
+      // Sprint 12: tell the realtime client about the JWT so RLS-protected
+      // postgres_changes subscriptions actually receive events.
+      if (data.session?.access_token) {
+        sb.realtime.setAuth(data.session.access_token);
+      }
       setLoading(false);
     });
     const { data: sub } = sb.auth.onAuthStateChange((_evt, sess) => {
       setSession(sess);
       if (sess?.user) refreshProfile(sess.user.id);
       else setProfile(null);
+      // Re-apply realtime auth on every session change so newly-subscribed
+      // channels (e.g. /sync-test mounting after sign-in) get a valid JWT.
+      if (sb.realtime && sess?.access_token) {
+        sb.realtime.setAuth(sess.access_token);
+      }
     });
     return () => { sub.subscription.unsubscribe(); };
   }, [refreshProfile]);

@@ -584,10 +584,14 @@ const RAW_COMPETITORS: CompetitorProperty[] = [
     freeRentWeeks: 0,
     lookAndLeaseBonus: 0,
     amenities: ["rooftop", "rooftop_pool", "gym", "theater", "garden_room", "pool_clubhouse", "security_24_7", "luxury_lobby", "coffee_offered", "scent_control", "exterior_quality"],
-    threatLevel: 5,
+    // threatLevel is the OLD single-score legacy field. Smart threat system (Sprint 10) separates
+    // directThreatScore (low ~1.7), tourQualityScore (high 4.5), learningScore (high 4.5).
+    // Jardine is a PREMIUM ASPIRATIONAL COMP — NOT a direct pricing threat to Baxter.
+    // Do NOT use Jardine as a rent anchor. Use it for leasing experience benchmarking ONLY.
+    threatLevel: 2,
     compQualityScore: 83,
     competitorStrategicType: "premium_amenity_comp",
-    competitorTags: ["premium_amenity_comp","field_verified","luxury_tier","low_availability","not_direct_rent_comp","scent_control","coffee_offered"],
+    competitorTags: ["premium_amenity_comp","field_verified","luxury_tier","low_availability","not_direct_rent_comp","scent_control","coffee_offered","premium_aspirational_comp"],
     fieldVerified: true,
     fieldVerifiedAt: "2026-05-27",
     fieldVerifiedBy: "Bailey",

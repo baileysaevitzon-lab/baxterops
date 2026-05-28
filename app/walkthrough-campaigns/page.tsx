@@ -1,10 +1,12 @@
 "use client";
 import { useEffect, useState } from "react";
 import { Card, CardBody, CardHeader, PageHeader, Badge } from "@/components/Card";
-import { COMPETITORS, WALKTHROUGH_TOURS } from "@/lib/seed";
+import { COMPETITORS as SEED_COMPETITORS, WALKTHROUGH_TOURS } from "@/lib/seed";
+import { useCompetitors } from "@/lib/hooks/useCompetitors";
 import { compositeBand, compositeScore, deleteTour, loadTours, upsertTour } from "@/lib/storage";
-import { loadAllFieldTours } from "@/lib/services/fieldTours";
+import { loadAllFieldTours, saveFieldTour } from "@/lib/services/fieldTours";
 import { QuickTourScorePanel } from "@/components/scoring/QuickTourScorePanel";
+import { LiveDataBanner } from "@/components/LiveDataBanner";
 import type { CompetitorFieldTour, WalkthroughTourRecord } from "@/lib/types";
 
 const CALL_SCRIPT = `Hi, I'm looking for a 1-bedroom apartment in Hollywood and hoping to move within the next month. I saw your building online and wanted to ask what availability and specials you currently have. Are you offering any free rent, look-and-lease specials, or parking concessions right now? Could I schedule a tour?`;
@@ -31,10 +33,10 @@ const QUESTIONS = [
   "What makes this building better than others nearby?",
 ];
 
-const blankTour = (compId = COMPETITORS[0].id): WalkthroughTourRecord => ({
+const blankTour = (compId = SEED_COMPETITORS[0].id): WalkthroughTourRecord => ({
   id: `wt-${Date.now()}`,
   competitorId: compId,
-  competitorName: COMPETITORS.find(c => c.id === compId)?.name ?? "",
+  competitorName: SEED_COMPETITORS.find(c => c.id === compId)?.name ?? "",
   assignedTo: "Bailey",
   tourDateTime: new Date().toISOString().slice(0, 16),
   leasingAgentName: "",
@@ -84,6 +86,9 @@ function recomputeComposite(t: WalkthroughTourRecord): WalkthroughTourRecord {
 }
 
 export default function Walkthroughs() {
+  // Sprint 12: live competitor list from Supabase
+  const { competitors: COMPETITORS } = useCompetitors();
+
   const [showScript, setShowScript] = useState(false);
   const [draft, setDraft] = useState<WalkthroughTourRecord>(blankTour());
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -98,8 +103,46 @@ export default function Walkthroughs() {
       await new Promise(r => setTimeout(r, 50));
       const all = await loadAllFieldTours();
       setServiceFieldTours(all);
+
+      // Sprint 12: one-time best-effort backfill — push any locally-stored
+      // walkthrough tours up to Supabase so they appear on other devices.
+      // Non-fatal: if Supabase is down or RLS blocks the write, silently skip.
+      const localTours = loadTours();
+      for (const lt of localTours) {
+        const alreadyInDb = all.some(s => s.id === lt.id);
+        if (alreadyInDb) continue;
+        try {
+          const compName = COMPETITORS.find(c => c.id === lt.competitorId)?.name ?? lt.competitorName;
+          await saveFieldTour({
+            id: lt.id,
+            competitorId: lt.competitorId,
+            competitorName: compName,
+            tourDate: (lt.tourDateTime ?? new Date().toISOString()).slice(0, 10),
+            collectedBy: lt.assignedTo ?? "Bailey",
+            assignedTo: lt.assignedTo ?? "Bailey",
+            tourStatus: "completed",
+            sourceLabel: `${lt.assignedTo ?? "Bailey"} walkthrough — backfill`,
+            tourBookingEase: lt.tourBookingEase ?? 3,
+            kindness: lt.kindness ?? 3,
+            professionalism: lt.professionalism ?? 3,
+            cleanliness: lt.cleanliness ?? 3,
+            tourQuality: lt.tourQuality ?? 3,
+            amenityQuality: lt.amenityQuality ?? 3,
+            pressureLevel: "medium",
+            compositeExperienceScore: lt.compositeExperienceScore,
+            fieldConfidence: "medium",
+            createdAt: lt.createdAt ?? new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+          });
+        } catch {
+          // not signed in — backfill will retry next visit
+        }
+      }
+      // refresh after backfill
+      const refreshed = await loadAllFieldTours();
+      setServiceFieldTours(refreshed);
     })();
-  }, []);
+  }, [COMPETITORS]);
 
   function patch<K extends keyof WalkthroughTourRecord>(k: K, v: WalkthroughTourRecord[K]) {
     setDraft(d => recomputeComposite({ ...d, [k]: v, updatedAt: new Date().toISOString() }));
@@ -108,10 +151,59 @@ export default function Walkthroughs() {
   async function save() {
     const compName = COMPETITORS.find(c => c.id === draft.competitorId)?.name ?? draft.competitorName;
     const next = recomputeComposite({ ...draft, competitorName: compName, updatedAt: new Date().toISOString() });
+
+    // 1. Write to localStorage (backward compat — keeps existing cards working)
     setTours(upsertTour(next));
-    // Sprint 6: subjective covariates now flow through the dedicated <CovariateForm/> below,
-    // which writes to manual_covariate_scores + mirrors into data_source_ledger.
-    // The form is keyed by field_tour id; user fills it after saving the basic tour record.
+
+    // 2. Sprint 11: also write to Supabase competitor_field_tours so other devices see it.
+    //    Map WalkthroughTourRecord → CompetitorFieldTour.
+    try {
+      const now = new Date().toISOString();
+      const fieldTour: CompetitorFieldTour = {
+        id: next.id,
+        competitorId: next.competitorId,
+        competitorName: next.competitorName,
+        tourDate: next.tourDateTime
+          ? next.tourDateTime.slice(0, 10)
+          : now.slice(0, 10),
+        collectedBy: next.assignedTo ?? "Bailey",
+        assignedTo: next.assignedTo ?? "Bailey",
+        tourStatus: "completed",
+        sourceLabel: `${next.assignedTo ?? "Bailey"} walkthrough — ${next.tourDateTime?.slice(0, 10) ?? now.slice(0, 10)}`,
+        tourBookingEase: next.tourBookingEase,
+        kindness: next.kindness,
+        professionalism: next.professionalism,
+        cleanliness: next.cleanliness,
+        tourQuality: next.tourQuality,
+        amenityQuality: next.amenityQuality,
+        pressureLevel: next.pressureLevel ?? "medium",
+        actualConcessions: next.actualConcessions ?? undefined,
+        hiddenDiscounts: next.hiddenDiscounts ?? undefined,
+        parkingDeal: next.parkingDeal ?? undefined,
+        moveInCost: next.moveInCost ?? undefined,
+        whyOrWhyNot: next.whyOrWhyNot ?? undefined,
+        baxterResponseRecommendation: next.baxterResponseRecommendation ?? undefined,
+        compositeExperienceScore: next.compositeExperienceScore,
+        wouldRenterChooseOverBaxter: next.wouldRenterChooseOverBaxter ?? false,
+        drinksOrSnacksOffered: next.drinksOrSnacksOffered ?? false,
+        feesWaivable: next.feesWaivable ?? false,
+        followUpPromised: next.followUpPromised ?? false,
+        followUpReceived: next.followUpReceived ?? false,
+        desperationVsConfidence: next.desperationVsConfidence ?? undefined,
+        closingStrength: next.closingStrength ?? undefined,
+        fieldConfidence: "high",
+        createdAt: next.createdAt,
+        updatedAt: now,
+      };
+      await saveFieldTour(fieldTour);
+      // Refresh service field tours list
+      const refreshed = await loadAllFieldTours();
+      setServiceFieldTours(refreshed);
+    } catch (e) {
+      // Non-fatal — localStorage write succeeded. Log and continue.
+      console.warn("[walkthrough-campaigns] Supabase write failed (tour still saved locally):", e);
+    }
+
     setDraft(blankTour());
     setEditingId(null);
   }
@@ -155,6 +247,7 @@ export default function Walkthroughs() {
 
   return (
     <>
+      <LiveDataBanner />
       <PageHeader
         title="Walkthrough Campaigns"
         subtitle="Tour Plan Generator · post-tour records · Quick Tour Grading. Saved tours and scores survive refresh."

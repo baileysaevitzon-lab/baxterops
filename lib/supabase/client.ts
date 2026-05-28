@@ -18,8 +18,18 @@ let cached: SupabaseClient | null = null;
 export function getSupabase(): SupabaseClient | null {
   if (!hasSupabaseEnv) return null;
   if (cached) return cached;
+  // persistSession defaults to true — sessions are stored in localStorage so
+  // users don't need to sign in again on every page reload or device visit.
+  // Sprint 11: this was the root cause of cross-device sync failures.
+  //
+  // Sprint 12: explicitly enable realtime with a rate-limit so that
+  // `supabase.channel(...).on('postgres_changes', ...).subscribe()` actually
+  // opens a WebSocket connection to /realtime/v1/. Without this, the channel
+  // subscribes but never receives events.
   cached = createClient(url!, key!, {
-    auth: { persistSession: false },
+    realtime: {
+      params: { eventsPerSecond: 10 },
+    },
   });
   return cached;
 }

@@ -22,6 +22,9 @@ import { saveFieldTour } from "@/lib/services/fieldTours";
 import { bulkUpsertObservedUnits } from "@/lib/services/competitorUnits";
 import { bulkUpsertAmenityObservations } from "@/lib/services/amenityObservations";
 import { bulkUpsertLedger } from "@/lib/services/sourceLedger";
+import { recomputeCompetitorIntelligence, upsertIntelligenceSummary } from "@/lib/services/competitorIntelligence";
+import { upsertCompetitor } from "@/lib/services/competitors";
+import { LiveDataBanner } from "@/components/LiveDataBanner";
 import { useRole } from "@/components/RoleProvider";
 import type {
   CompetitorAmenityObservation,
@@ -329,11 +332,93 @@ export default function AddTour() {
         });
       }
 
-      // Write everything
+      // Sprint 12: write the competitor record FIRST so the property
+      // exists in the canonical `competitors` table and shows up on
+      // /competitors, /competitor-intelligence, /comp-matching, etc.
+      // Without this, /add-tour creates orphaned child rows.
+      //
+      // Synthesize unitTypes summary from observedUnits — group by bed count.
+      const unitTypeMap = new Map<string, { rents: number[]; sqfts: number[] }>();
+      for (const u of observedUnits) {
+        if (u.bedCount === undefined && u.askingRent === undefined) continue;
+        const beds = u.bedCount ?? 0;
+        const key = beds === 0 ? "studio" : `${beds}BR`;
+        if (!unitTypeMap.has(key)) unitTypeMap.set(key, { rents: [], sqfts: [] });
+        const bucket = unitTypeMap.get(key)!;
+        if (u.askingRent !== undefined && u.askingRent !== null) bucket.rents.push(u.askingRent);
+        if (u.squareFeet !== undefined && u.squareFeet !== null) bucket.sqfts.push(u.squareFeet);
+      }
+      const unitTypesSummary = Array.from(unitTypeMap.entries()).map(([type, { rents, sqfts }]) => {
+        const avg = (xs: number[]) => (xs.length ? xs.reduce((s, x) => s + x, 0) / xs.length : undefined);
+        return {
+          type: type as "studio" | "1BR" | "2BR" | "3BR",
+          minRent: rents.length ? Math.min(...rents) : undefined,
+          maxRent: rents.length ? Math.max(...rents) : undefined,
+          avgRent: avg(rents),
+          minSqft: sqfts.length ? Math.min(...sqfts) : undefined,
+          maxSqft: sqfts.length ? Math.max(...sqfts) : undefined,
+          avgSqft: avg(sqfts),
+        };
+      });
+
+      try {
+        await upsertCompetitor({
+          id: competitorId,
+          name: name.trim(),
+          address: address.trim(),
+          website: website.trim() || undefined,
+          units: observedUnits.length || 0,
+          unitTypes: unitTypesSummary,
+          amenities: amenities.map(a => a.amenity),
+          competitorStrategicType: (() => {
+            // Map form value into the type-narrowed enum the DB stores.
+            switch (strategicType) {
+              case "premium_amenity_comp": return "premium_amenity_comp";
+              case "balanced_comp":        return "balanced_comp";
+              case "budget_comp":          return "value_comp";
+              case "non_comparable":       return "unknown";
+              default:                     return undefined;
+            }
+          })(),
+          fieldVerified: true,
+          fieldVerifiedAt: tourDate,
+          fieldVerifiedBy: collectedBy,
+          fieldVerificationConfidence: "high",
+          specials: actualConcessions || undefined,
+          notes: whyOrWhyNot || undefined,
+          dataConfidence: "high",
+          sourceType: "field_tour",
+          lastVerifiedAt: now,
+          verifiedBy: collectedBy,
+          createdBy: collectedBy,
+        });
+      } catch (e) {
+        // If competitor write fails (e.g. not signed in), bail before writing
+        // child rows so we don't leave orphaned tour/unit records.
+        throw new Error(
+          `Could not save competitor record: ${e instanceof Error ? e.message : String(e)}. ` +
+            `Are you signed in? Child rows were NOT written.`,
+        );
+      }
+
+      // Write everything else
       await saveFieldTour(tour);
       if (observedUnits.length > 0) await bulkUpsertObservedUnits(observedUnits);
       if (observedAmenities.length > 0) await bulkUpsertAmenityObservations(observedAmenities);
       if (ledgerRows.length > 0) await bulkUpsertLedger(ledgerRows);
+
+      // Sprint 11: Immediately compute + write competitor_intelligence_summary so this
+      // new comp appears in the Smart Threat Matrix on /competitor-intelligence without
+      // needing a manual recompute step.
+      try {
+        const scores = await recomputeCompetitorIntelligence(competitorId);
+        if (scores) {
+          await upsertIntelligenceSummary(competitorId, scores);
+        }
+      } catch (e) {
+        // Non-fatal — the tour and units are saved. Intelligence summary can be added later.
+        console.warn("[AddTour] intelligence summary compute failed (non-fatal):", e);
+      }
 
       setSavedId(tourId);
     } catch (e) {
@@ -370,6 +455,7 @@ export default function AddTour() {
 
   return (
     <>
+      <LiveDataBanner />
       <PageHeader
         title="Add Tour — new property"
         subtitle="Generic field-tour intake. Writes to Supabase (field tour + unit observations + amenities + source ledger) so future properties don't need a hand-coded seed sprint."

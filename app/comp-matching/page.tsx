@@ -1,14 +1,26 @@
 "use client";
 import { useEffect, useState } from "react";
 import { Card, CardBody, CardHeader, PageHeader, Badge } from "@/components/Card";
-import { BAXTER_UNITS, COMPETITORS, DEFAULT_MATCHING_WEIGHTS } from "@/lib/seed";
+import { BAXTER_UNITS, DEFAULT_MATCHING_WEIGHTS } from "@/lib/seed";
+import { useCompetitors } from "@/lib/hooks/useCompetitors";
 import { closestComps, fmtMoney } from "@/lib/calc";
 import { getAllObservedUnits } from "@/lib/services/competitorUnits";
 import { getAllConflicts } from "@/lib/services/sourceConflicts";
+import { useTouredIds } from "@/lib/hooks/useTouredIds";
+import { useTouredOnly } from "@/lib/hooks/useTouredOnly";
+import { TouredOnlyToggle } from "@/components/TouredOnlyToggle";
 import { SourceBadge } from "@/components/SourceBadge";
+import { LiveDataBanner } from "@/components/LiveDataBanner";
 import type { CompetitorUnitObservation, MatchingWeights, SourceConflictRow } from "@/lib/types";
 
 export default function CompMatching() {
+  // Sprint 12: live competitor list from Supabase
+  const { competitors: COMPETITORS } = useCompetitors();
+
+  // Sprint 13: shared toured-only state + canonical detector
+  const { touredIds, touredCount } = useTouredIds();
+  const [touredOnly, setTouredOnly] = useTouredOnly();
+
   const [unitId, setUnitId] = useState(BAXTER_UNITS[1].id);
   const [weights, setWeights] = useState<MatchingWeights>(DEFAULT_MATCHING_WEIGHTS);
   const [mode, setMode] = useState<"averages" | "observed" | "both">("both");
@@ -18,15 +30,22 @@ export default function CompMatching() {
   useEffect(() => {
     (async () => {
       await new Promise(r => setTimeout(r, 30));
-      setObserved(await getAllObservedUnits());
-      setConflicts(await getAllConflicts());
+      const [obs, conflictsAll] = await Promise.all([
+        getAllObservedUnits(),
+        getAllConflicts(),
+      ]);
+      setObserved(obs);
+      setConflicts(conflictsAll);
     })();
   }, []);
 
   const hasUnitConflict = (unitId: string) => conflicts.some(c => c.entityId === unitId && c.status !== "resolved" && c.status !== "accept_a" && c.status !== "accept_b" && c.status !== "accept_c");
 
   const unit = BAXTER_UNITS.find(u => u.id === unitId)!;
-  const matches = closestComps(unit, COMPETITORS, weights, 10);
+  const visibleComps = touredOnly
+    ? COMPETITORS.filter(c => touredIds.has(c.id))
+    : COMPETITORS;
+  const matches = closestComps(unit, visibleComps, weights, 10);
 
   // Filter observed units to the same bedroom count as the selected Baxter unit
   const matchingObserved = observed.filter(o => o.bedCount === unit.bedrooms);
@@ -46,16 +65,25 @@ export default function CompMatching() {
 
   return (
     <>
+      <LiveDataBanner />
       <PageHeader
         title="Comp Matching Engine"
         subtitle="Weighted-distance matcher: pick a Baxter unit, see closest comparable competitors. Toggle between property averages, field-observed units, or both."
         action={
-          <div className="flex bg-slate-100 rounded-md p-1 text-xs">
-            {(["averages","observed","both"] as const).map(m => (
-              <button key={m} onClick={() => setMode(m)} className={`px-3 py-1 rounded ${mode === m ? "bg-white shadow font-medium" : "text-slate-500"}`}>
-                {m}
-              </button>
-            ))}
+          <div className="flex gap-2 items-center">
+            <TouredOnlyToggle
+              on={touredOnly}
+              onToggle={setTouredOnly}
+              touredCount={touredCount}
+              totalCount={COMPETITORS.length}
+            />
+            <div className="flex bg-slate-100 rounded-md p-1 text-xs">
+              {(["averages","observed","both"] as const).map(m => (
+                <button key={m} onClick={() => setMode(m)} className={`px-3 py-1 rounded ${mode === m ? "bg-white shadow font-medium" : "text-slate-500"}`}>
+                  {m}
+                </button>
+              ))}
+            </div>
           </div>
         }
       />
@@ -188,7 +216,10 @@ export default function CompMatching() {
 
       {(mode === "averages" || mode === "both") && (
       <Card>
-        <CardHeader title={`Top 10 matches for unit ${unit.unitNumber} — property averages`} subtitle="Sorted by weighted similarity score" />
+        <CardHeader
+          title={`Top 10 matches for unit ${unit.unitNumber} — property averages${touredOnly ? " (toured only)" : ""}`}
+          subtitle="Sorted by weighted similarity score"
+        />
         <CardBody className="p-0">
           <table className="bx">
             <thead>

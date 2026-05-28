@@ -177,6 +177,27 @@ export default function Settings() {
       {/* ----- Sprint 7: Deployment Target ----- */}
       <DeploymentTargetPanel />
 
+      {/* ----- Sprint 12: Cross-Device Sync QA ----- */}
+      <Card className="mb-6 border-l-4 border-l-emerald-500">
+        <CardHeader
+          title="Cross-Device Sync QA"
+          subtitle="Open /sync-test on two browsers to verify Supabase writes propagate live."
+        />
+        <CardBody>
+          <p className="text-sm text-slate-700 mb-3">
+            Use this tool to prove that data added on Computer A appears on Computer B. Both
+            browsers must be signed in to the same project. Creates a temporary &quot;Sync Test&quot;
+            competitor row that you can edit + delete from the page.
+          </p>
+          <a
+            href="/sync-test"
+            className="inline-block px-4 py-2 rounded-md bg-emerald-700 text-white text-sm"
+          >
+            Open /sync-test →
+          </a>
+        </CardBody>
+      </Card>
+
       {/* ----- Sprint 4 backend admin ----- */}
       <Card className="mb-6 border-l-4 border-l-sky-500">
         <CardHeader

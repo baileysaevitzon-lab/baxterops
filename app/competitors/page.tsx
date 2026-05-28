@@ -2,12 +2,19 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { Card, CardBody, CardHeader, PageHeader, Badge } from "@/components/Card";
-import { COMPETITORS } from "@/lib/seed";
+import { useCompetitors } from "@/lib/hooks/useCompetitors";
+import { useTouredIds } from "@/lib/hooks/useTouredIds";
+import { useTouredOnly } from "@/lib/hooks/useTouredOnly";
+import { TouredOnlyToggle } from "@/components/TouredOnlyToggle";
 import { fmtMoney } from "@/lib/calc";
 import { DATA_QUALITY_FLAGS } from "@/lib/dataQuality";
 import { getAllPhotoEvidence } from "@/lib/services/photoEvidence";
+import { getAllIntelligenceSummaries, CLASSIFICATION_LABELS, CLASSIFICATION_COLORS, updateSummaryNotes } from "@/lib/services/competitorIntelligence";
+import { getSupabase } from "@/lib/supabase/client";
 import { SourceBadge } from "@/components/SourceBadge";
-import type { CompetitorProperty, DataConfidence } from "@/lib/types";
+import { LiveDataBanner } from "@/components/LiveDataBanner";
+import { InlineEditField } from "@/components/InlineEditField";
+import type { CompetitorProperty, DataConfidence, CompetitorIntelligenceSummary } from "@/lib/types";
 
 const CONFIDENCE_COLOR: Record<DataConfidence, "good" | "warn" | "bad" | "neutral"> = {
   high: "good",
@@ -30,51 +37,113 @@ const SOURCE_LABEL: Record<NonNullable<CompetitorProperty["sourceType"]>, string
 };
 
 export default function Competitors() {
+  // Sprint 12: read competitors from Supabase (with seed fallback when unauthenticated).
+  // This is what makes /add-tour properties appear here.
+  const { competitors, isLive } = useCompetitors();
+  // Sprint 13: shared toured-only state + canonical "what counts as toured" detector.
+  const { touredIds, touredCount } = useTouredIds();
+  const [touredOnly, setTouredOnly] = useTouredOnly();
+
   const [sortBy, setSortBy] = useState<"name" | "quality" | "distance" | "threat" | "verify">("quality");
   const [verifiedAt, setVerifiedAt] = useState<Record<string, string>>({});
   const [tab, setTab] = useState<"all" | "queue">("all");
   const [photoCounts, setPhotoCounts] = useState<Record<string, number>>({});
+  const [intelligenceSummaries, setIntelligenceSummaries] = useState<Map<string, CompetitorIntelligenceSummary>>(new Map());
 
   useEffect(() => {
+    let channel: ReturnType<NonNullable<ReturnType<typeof getSupabase>>["channel"]> | null = null;
+
     (async () => {
-      const all = await getAllPhotoEvidence();
+      const [photoAll, summaries] = await Promise.all([
+        getAllPhotoEvidence(),
+        getAllIntelligenceSummaries(),
+      ]);
       const counts: Record<string, number> = {};
-      for (const p of all) counts[p.competitorId] = (counts[p.competitorId] ?? 0) + 1;
+      for (const p of photoAll) counts[p.competitorId] = (counts[p.competitorId] ?? 0) + 1;
       setPhotoCounts(counts);
+      setIntelligenceSummaries(summaries);
+
+      // Sprint 11: Subscribe to intelligence summary changes for live cross-device sync.
+      // When Bailey edits notes on computer A, Shane sees it on computer B within ~1s.
+      const sb = getSupabase();
+      if (sb) {
+        channel = sb
+          // Sprint 12: unique-per-mount channel name to avoid StrictMode collisions
+          .channel(`competitors-page-intel-${Math.random().toString(36).slice(2)}`)
+          .on(
+            "postgres_changes",
+            { event: "*", schema: "public", table: "competitor_intelligence_summary" },
+            (payload) => {
+              const row = payload.new as Record<string, unknown>;
+              if (!row || !row.competitor_id) return;
+              const id = row.competitor_id as string;
+              // Re-fetch just this competitor's summary
+              getAllIntelligenceSummaries().then(fresh => {
+                setIntelligenceSummaries(fresh);
+              });
+            },
+          )
+          .subscribe();
+      }
     })();
-  }, []);
+
+    return () => {
+      if (channel) {
+        const sb = getSupabase();
+        sb?.removeChannel(channel);
+      }
+    };
+    // Re-run when competitors list changes (e.g. a new comp inserted via /add-tour
+    // on another device fires the useCompetitors realtime channel).
+  }, [competitors]);
 
   function markVerified(id: string) {
     const ts = new Date().toISOString().slice(0, 10);
     setVerifiedAt(v => ({ ...v, [id]: ts }));
   }
 
-  const augmented = COMPETITORS.map(c => ({
+  const augmented = competitors.map(c => ({
     ...c,
     lastVerifiedAt: verifiedAt[c.id] ?? c.lastVerifiedAt,
   }));
 
+  // "Toured Only" filters to comps with a Supabase field tour or fieldVerified=true in seed
+  const baseList = touredOnly ? augmented.filter(c => touredIds.has(c.id)) : augmented;
+
   const sorted = useMemo(() => {
-    const arr = [...augmented];
+    const arr = [...baseList];
     if (sortBy === "name") arr.sort((a, b) => a.name.localeCompare(b.name));
     else if (sortBy === "distance") arr.sort((a, b) => (a.distanceMiles ?? 99) - (b.distanceMiles ?? 99));
-    else if (sortBy === "threat") arr.sort((a, b) => (b.threatLevel ?? 0) - (a.threatLevel ?? 0));
+    else if (sortBy === "threat") {
+      arr.sort((a, b) => {
+        const sa = intelligenceSummaries.get(a.id)?.directThreatScore ?? (a.threatLevel ?? 0);
+        const sb = intelligenceSummaries.get(b.id)?.directThreatScore ?? (b.threatLevel ?? 0);
+        return sb - sa;
+      });
+    }
     else if (sortBy === "verify") arr.sort((a, b) => verifyPriority(b) - verifyPriority(a));
     else arr.sort((a, b) => (b.compQualityScore ?? 0) - (a.compQualityScore ?? 0));
     return arr;
-  }, [augmented, sortBy]);
+  }, [baseList, sortBy, intelligenceSummaries]);
 
   const queue = useMemo(() => [...augmented].sort((a, b) => verifyPriority(b) - verifyPriority(a)), [augmented]);
 
   return (
     <>
+      <LiveDataBanner />
       <PageHeader
         title="Competitor Database"
-        subtitle="17 Hollywood properties · source-verified weekly. Open the Verification Queue tab to see what to confirm first."
+        subtitle="17 Hollywood properties · smart threat classification powered by 3-score system. Open the Verification Queue tab to see what to confirm first."
         action={
-          <div className="flex gap-2 text-xs">
-            <button onClick={() => setTab("all")} className={`px-3 py-1.5 rounded-md border ${tab === "all" ? "bg-slate-900 text-white border-slate-900" : "bg-white border-slate-200"}`}>All comps</button>
-            <button onClick={() => setTab("queue")} className={`px-3 py-1.5 rounded-md border ${tab === "queue" ? "bg-slate-900 text-white border-slate-900" : "bg-white border-slate-200"}`}>Verification queue</button>
+          <div className="flex gap-2 text-xs flex-wrap items-center">
+            <TouredOnlyToggle
+              on={touredOnly}
+              onToggle={setTouredOnly}
+              touredCount={touredCount}
+              totalCount={competitors.length}
+            />
+            <button onClick={() => setTab("all")} className={`px-3 py-1.5 rounded-md border ${tab === "all" ? "bg-slate-900 text-white border-slate-900" : "bg-white border-slate-200"}`}>Cards</button>
+            <button onClick={() => setTab("queue")} className={`px-3 py-1.5 rounded-md border ${tab === "queue" ? "bg-slate-900 text-white border-slate-900" : "bg-white border-slate-200"}`}>Verify queue</button>
           </div>
         }
       />
@@ -85,22 +154,26 @@ export default function Competitors() {
           <CardBody className="p-0">
             <table className="bx">
               <thead>
-                <tr><th>Property</th><th>Confidence</th><th>Last verified</th><th>Flags</th><th>Threat</th><th>Quality</th><th></th></tr>
+                <tr><th>Property</th><th>Confidence</th><th>Last verified</th><th>Flags</th><th>Direct Threat</th><th>Classification</th><th></th></tr>
               </thead>
               <tbody>
-                {queue.map(c => (
-                  <tr key={c.id}>
-                    <td className="font-medium">{c.name}</td>
-                    <td><Badge intent={CONFIDENCE_COLOR[c.dataConfidence ?? "unknown"]}>{c.dataConfidence}</Badge></td>
-                    <td className="text-xs">{c.lastVerifiedAt ?? "—"}</td>
-                    <td className="text-xs">{(c.dataQualityFlags ?? []).length}</td>
-                    <td>{c.threatLevel ?? "—"}/5</td>
-                    <td>{c.compQualityScore ?? "—"}</td>
-                    <td className="text-right">
-                      <button onClick={() => markVerified(c.id)} className="text-xs px-2 py-1 bg-slate-900 text-white rounded">Mark verified now</button>
-                    </td>
-                  </tr>
-                ))}
+                {queue.map(c => {
+                  const intel = intelligenceSummaries.get(c.id);
+                  const cls = intel?.manualClassification ?? intel?.systemClassification;
+                  return (
+                    <tr key={c.id}>
+                      <td className="font-medium">{c.name}</td>
+                      <td><Badge intent={CONFIDENCE_COLOR[c.dataConfidence ?? "unknown"]}>{c.dataConfidence}</Badge></td>
+                      <td className="text-xs">{c.lastVerifiedAt ?? "—"}</td>
+                      <td className="text-xs">{(c.dataQualityFlags ?? []).length}</td>
+                      <td>{intel ? `${intel.directThreatScore}/5` : `${c.threatLevel ?? "—"}/5`}</td>
+                      <td>{cls ? <Badge intent={CLASSIFICATION_COLORS[cls]}>{CLASSIFICATION_LABELS[cls]}</Badge> : "—"}</td>
+                      <td className="text-right">
+                        <button onClick={() => markVerified(c.id)} className="text-xs px-2 py-1 bg-slate-900 text-white rounded">Mark verified now</button>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </CardBody>
@@ -124,6 +197,9 @@ export default function Competitors() {
               const flags = (c.dataQualityFlags ?? [])
                 .map(fid => DATA_QUALITY_FLAGS.find(f => f.id === fid))
                 .filter((x): x is NonNullable<typeof x> => !!x);
+              const intel = intelligenceSummaries.get(c.id);
+              const effectiveClassification = intel?.manualClassification ?? intel?.systemClassification;
+
               return (
                 <Card key={c.id}>
                   <CardHeader
@@ -138,14 +214,23 @@ export default function Competitors() {
                         )}
                         {c.compQualityScore !== undefined && (
                           <Badge intent={c.compQualityScore >= 80 ? "bad" : c.compQualityScore >= 70 ? "warn" : "neutral"}>
-                            comp quality {c.compQualityScore}
+                            quality {c.compQualityScore}
                           </Badge>
                         )}
-                        {c.threatLevel && <Badge intent={c.threatLevel >= 4 ? "bad" : "warn"}>threat {c.threatLevel}/5</Badge>}
+                        {effectiveClassification && (
+                          <Badge intent={CLASSIFICATION_COLORS[effectiveClassification]}>
+                            {CLASSIFICATION_LABELS[effectiveClassification]}
+                          </Badge>
+                        )}
                       </div>
                     }
                   />
                   <CardBody>
+                    {/* Smart threat 3-badge row */}
+                    {intel && (
+                      <SmartThreatBadgeRow intel={intel} />
+                    )}
+
                     <div className="flex flex-wrap gap-1 mb-3 items-center">
                       <Badge intent="info">{SOURCE_LABEL[c.sourceType ?? "unverified"]}</Badge>
                       <Badge intent={CONFIDENCE_COLOR[c.dataConfidence ?? "unknown"]}>
@@ -234,14 +319,40 @@ export default function Competitors() {
                               {photoCounts[c.id] ?? 0} photos · amenity threat {c.amenityThreatLevel ?? "—"}/5 · parking {c.parkingThreatLevel ?? "—"}/5 · concession {c.concessionThreatLevel ?? "—"}/5
                             </div>
                           </div>
-                          <Link href={`/competitors/${c.id.replace("c-", "")}`} className="text-xs px-2 py-1 bg-emerald-700 text-white rounded">
-                            Open detail →
-                          </Link>
+                          <div className="flex gap-2">
+                            <Link href={`/competitors/${c.id.replace("c-", "")}#compare-against-baxter`} className="text-xs px-2 py-1 bg-sky-700 text-white rounded hover:bg-sky-800">
+                              Compare vs Baxter
+                            </Link>
+                            <Link href={`/competitors/${c.id.replace("c-", "")}`} className="text-xs px-2 py-1 bg-emerald-700 text-white rounded">
+                              Open detail →
+                            </Link>
+                          </div>
                         </div>
                       </div>
                     )}
 
-                    {c.notes && <p className="text-xs text-slate-500 mt-3 italic">{c.notes}</p>}
+                    {/* Intelligence notes — inline editable, writes to Supabase */}
+                    <div className="mt-3 text-xs text-slate-500">
+                      <InlineEditField
+                        value={intel?.summaryNotes ?? c.notes ?? null}
+                        placeholder="Add intelligence notes…"
+                        multiline
+                        className="italic"
+                        onSave={async (v) => {
+                          const ok = await updateSummaryNotes(c.id, v);
+                          if (!ok) throw new Error("Supabase write failed — sign in and retry");
+                          // Optimistically update local state
+                          setIntelligenceSummaries(prev => {
+                            const next = new Map(prev);
+                            const existing = next.get(c.id);
+                            if (existing) {
+                              next.set(c.id, { ...existing, summaryNotes: v });
+                            }
+                            return next;
+                          });
+                        }}
+                      />
+                    </div>
                     {c.phone && <div className="text-xs text-slate-500 mt-3">☎ {c.phone}</div>}
                   </CardBody>
                 </Card>
@@ -252,6 +363,50 @@ export default function Competitors() {
       )}
     </>
   );
+}
+
+/** 3-score badge row — Direct Threat / Tour Quality / Learning Value */
+function SmartThreatBadgeRow({ intel }: { intel: CompetitorIntelligenceSummary }) {
+  return (
+    <div className="mb-3 flex flex-wrap gap-2 text-xs">
+      <ThreatMeter label="Direct Threat" score={intel.directThreatScore} colorFn={directThreatColor} />
+      {intel.tourQualityScore !== null ? (
+        <ThreatMeter label="Tour Quality" score={intel.tourQualityScore} colorFn={tourQualityColor} />
+      ) : (
+        <span className="px-2 py-1 bg-slate-100 text-slate-400 rounded-md">Tour Quality: not toured</span>
+      )}
+      <ThreatMeter label="Learning Value" score={intel.learningScore} colorFn={learningColor} />
+    </div>
+  );
+}
+
+function ThreatMeter({ label, score, colorFn }: { label: string; score: number; colorFn: (s: number) => string }) {
+  const pct = (score / 5) * 100;
+  return (
+    <div className={`flex items-center gap-1.5 px-2 py-1 rounded-md border ${colorFn(score)}`}>
+      <span className="font-medium">{label}:</span>
+      <span className="font-bold">{score.toFixed(1)}</span>
+      <div className="w-12 h-1.5 bg-white/50 rounded">
+        <div className="h-1.5 rounded" style={{ width: `${pct}%`, background: "currentColor", opacity: 0.7 }} />
+      </div>
+    </div>
+  );
+}
+
+function directThreatColor(s: number): string {
+  if (s >= 3.7) return "bg-red-50 border-red-300 text-red-800";
+  if (s >= 2.8) return "bg-amber-50 border-amber-300 text-amber-800";
+  return "bg-slate-50 border-slate-200 text-slate-600";
+}
+function tourQualityColor(s: number): string {
+  if (s >= 4.0) return "bg-purple-50 border-purple-300 text-purple-800";
+  if (s >= 3.0) return "bg-sky-50 border-sky-300 text-sky-800";
+  return "bg-slate-50 border-slate-200 text-slate-600";
+}
+function learningColor(s: number): string {
+  if (s >= 3.5) return "bg-emerald-50 border-emerald-300 text-emerald-800";
+  if (s >= 2.5) return "bg-sky-50 border-sky-300 text-sky-800";
+  return "bg-slate-50 border-slate-200 text-slate-600";
 }
 
 function verifyPriority(c: CompetitorProperty): number {
