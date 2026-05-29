@@ -371,8 +371,15 @@ const CLIENT_JS = `
     var blob = new Blob([html], {type: "text/html;charset=utf-8"});
     var url = URL.createObjectURL(blob);
     var a = document.createElement("a"); a.href = url;
-    var safe = (META.tenantName || "tenant").replace(/[^a-z0-9]+/gi, "_");
-    a.download = "LAHD-recert-" + safe + (complete ? "-COMPLETED" : "-DRAFT") + ".html";
+    var nameW = byName["_identity_name"]; var nameV = nameW ? getVal(nameW) : "";
+    var unitW = byName["_identity_unit"]; var unitV = unitW ? getVal(unitW) : "";
+    var safeName = nameV.replace(/[^a-z0-9]+/gi, "_").replace(/^_+|_+$/, "") || "";
+    var safeUnit = unitV.replace(/[^a-z0-9]+/gi, "_").replace(/^_+|_+$/, "") || "";
+    var suffix = complete ? "_COMPLETED" : "_DRAFT";
+    var fn = (safeName && safeUnit) ? ("LAHD_Recert_" + safeName + "_Unit_" + safeUnit + suffix + ".html")
+           : safeName ? ("LAHD_Recert_" + safeName + suffix + ".html")
+           : ("LAHD_Recertification" + suffix + ".html");
+    a.download = fn;
     document.body.appendChild(a); a.click(); document.body.removeChild(a);
     setTimeout(function(){ URL.revokeObjectURL(url); }, 1500);
   }
@@ -425,15 +432,13 @@ const CLIENT_JS = `
 export function renderTenantOfflineHtml(schema: CompletionFormSchema): string {
   const cs = schema.caseSummary;
   const meta = {
-    caseId: schema.caseId,
+    caseId: "",
     templateId: schema.templateId,
     role: schema.role,
-    tenantName: cs.tenantName,
-    unitNumber: cs.unitNumber ?? "",
     propertyName: cs.propertyName,
   };
   const initialPayload = {
-    caseId: schema.caseId,
+    caseId: "",
     templateId: schema.templateId,
     role: schema.role,
     complete: false,
@@ -441,7 +446,6 @@ export function renderTenantOfflineHtml(schema: CompletionFormSchema): string {
     answers: {} as Record<string, unknown>,
   };
   const sectionsHtml = schema.sections.map(renderSection).join("");
-  const unitLine = cs.unitNumber ? ` &middot; Unit ${escHtml(cs.unitNumber)}` : "";
 
   return (
     `<!DOCTYPE html>
@@ -449,13 +453,13 @@ export function renderTenantOfflineHtml(schema: CompletionFormSchema): string {
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>LAHD Recertification — ${escHtml(cs.tenantName)}</title>
+<title>LAHD Recertification — Tenant Completion Form</title>
 <style>${FORM_CSS}</style>
 </head>
 <body>
 <div class="topbar">
   <div class="topbar-inner">
-    <h1>LAHD Recertification — ${escHtml(cs.tenantName)}${unitLine}</h1>
+    <h1>LAHD Recertification — Tenant Completion Form</h1>
     <div class="sub">${escHtml(cs.propertyName)}</div>
     <div class="plabel" id="plabel">0 required fields complete</div>
   </div>
@@ -474,6 +478,33 @@ export function renderTenantOfflineHtml(schema: CompletionFormSchema): string {
     When you are done, tap <strong>Download my filled form</strong> at the bottom and email the saved
     file back to your property manager. Your answers stay on your device until you send the file.
   </div>
+
+  <section class="card">
+    <h2 class="section-title">Your Information</h2>
+    <p class="section-desc">Please fill in your details. These identify your completed form when you email it back.</p>
+    <div class="fields">
+      <div class="field" data-field="_identity_name" data-type="text" data-page="0" data-required="1" data-required-visible="0" data-clears="0" data-parent="" data-trigger="">
+        <label class="field-label">Full legal name<span class="req" title="Required">*</span></label>
+        <input class="fld" type="text" value="" placeholder="As it appears on your ID">
+      </div>
+      <div class="field" data-field="_identity_unit" data-type="text" data-page="0" data-required="1" data-required-visible="0" data-clears="0" data-parent="" data-trigger="">
+        <label class="field-label">Unit number<span class="req" title="Required">*</span></label>
+        <input class="fld" type="text" value="" placeholder="e.g. 502">
+      </div>
+      <div class="field" data-field="_identity_email" data-type="text" data-page="0" data-required="0" data-required-visible="0" data-clears="0" data-parent="" data-trigger="">
+        <label class="field-label">Email address <span style="font-weight:400;color:#64748b">(optional)</span></label>
+        <input class="fld" type="email" value="" placeholder="your@email.com">
+      </div>
+      <div class="field" data-field="_identity_phone" data-type="text" data-page="0" data-required="0" data-required-visible="0" data-clears="0" data-parent="" data-trigger="">
+        <label class="field-label">Phone number <span style="font-weight:400;color:#64748b">(optional)</span></label>
+        <input class="fld" type="tel" value="" placeholder="(555) 555-5555">
+      </div>
+      <div class="field" data-field="_identity_date" data-type="date" data-page="0" data-required="1" data-required-visible="0" data-clears="0" data-parent="" data-trigger="">
+        <label class="field-label">Today&#x27;s date<span class="req" title="Required">*</span></label>
+        <input class="fld" type="date" value="">
+      </div>
+    </div>
+  </section>
 
   ${sectionsHtml}
 
@@ -506,8 +537,7 @@ export async function buildTenantOfflineHtml(
   const schema = await buildTenantFormSchema(caseId);
   if (!schema) return null;
   const html = renderTenantOfflineHtml(schema);
-  const safe = (schema.caseSummary.tenantName || "tenant").replace(/[^a-z0-9]+/gi, "_");
-  return { html, filename: `LAHD-recert-${safe}-FILLABLE.html`, schema };
+  return { html, filename: "LAHD_Recertification_Tenant_Form.html", schema };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -544,8 +574,8 @@ export function parseOfflineFormPayload(htmlText: string): ParsedOfflineForm {
     throw new Error("The embedded form data is corrupted and could not be read.");
   }
   const d = data as Record<string, unknown>;
-  if (!d || typeof d !== "object" || !d.caseId) {
-    throw new Error("This file is missing its case identifier — it may not be a returned LAHD form.");
+  if (!d || typeof d !== "object") {
+    throw new Error("This file is missing its recertification data — it may not be a returned LAHD form.");
   }
   const rawAnswers = (d.answers && typeof d.answers === "object" ? d.answers : {}) as Record<string, unknown>;
   const answers: ParsedOfflineForm["answers"] = {};
@@ -563,7 +593,7 @@ export function parseOfflineFormPayload(htmlText: string): ParsedOfflineForm {
     }
   }
   return {
-    caseId: String(d.caseId),
+    caseId: d.caseId ? String(d.caseId) : "",
     templateId: String(d.templateId ?? ""),
     role: String(d.role ?? "tenant"),
     complete: Boolean(d.complete),
@@ -596,7 +626,7 @@ export async function commitImportedAnswers(args: {
 }): Promise<ImportResult> {
   const base: ImportResult = { ok: false, written: 0, signatures: 0, skippedOrphans: 0, skippedUnknown: 0, clearedOrphans: 0 };
 
-  if (args.parsed.caseId !== args.caseId) {
+  if (args.parsed.caseId && args.parsed.caseId !== args.caseId) {
     return { ...base, error: `This form is for case "${args.parsed.caseId}", but you are importing into "${args.caseId}". Open the matching case and try again.` };
   }
 
