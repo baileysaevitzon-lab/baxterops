@@ -29,7 +29,9 @@ const sections = [
     label: "Compliance",
     items: [
       { href: "/tenant-outreach", label: "Tenant Outreach" },
-      { href: "/recertification", label: "Recertification" },
+      { href: "/recertification/tenant-form", label: "Tenant Recertification Form" },
+      { href: "/recertification/manager-form", label: "Prop. Manager Recert. Form" },
+      { href: "/recertification/compiler", label: "Income Cert. Compiler" },
       { href: "/utility-allowance", label: "Utility Allowance" },
     ],
   },

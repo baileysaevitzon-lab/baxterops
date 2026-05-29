@@ -906,7 +906,11 @@ export type RecertDocumentType =
   | "self_employment_document" | "voe" | "applicant_statement"
   | "conflict_of_interest" | "asset_certification" | "clarification"
   | "rent_determination" | "utility_allowance_table" | "covenant"
-  | "rent_schedule" | "other";
+  | "rent_schedule"
+  | "tax_return" | "irs_non_filing" | "pension_retirement" | "public_assistance"
+  | "child_support" | "alimony" | "recurring_income" | "real_estate"
+  | "investment_statement"
+  | "other";
 
 export interface RecertDocument {
   id: string;
