@@ -10,6 +10,10 @@
 import { useState, useEffect, useCallback } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
+import { useAuth } from "@/components/AuthProvider";
+import { getSupabase } from "@/lib/supabase/client";
+import { OfflineTenantFormPanel } from "@/components/OfflineTenantFormPanel";
+import { loadSession } from "@/lib/services/recertCompletionForms";
 import {
   getCaseById,
   saveCase,
@@ -58,20 +62,28 @@ import type {
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
-const TABS = [
-  { key: "overview",        label: "Overview" },
-  { key: "household",       label: "Household" },
-  { key: "documents",       label: "Documents" },
-  { key: "review",          label: "Checklist Review" },
-  { key: "income",          label: "Income" },
-  { key: "assets",          label: "Assets / Deposits" },
-  { key: "rent",            label: "Rent + Utility" },
-  { key: "clarifications",  label: "Clarifications" },
-  { key: "submission",      label: "Submission Prep" },
-  { key: "audit",           label: "Audit Trail" },
+// Sprint 23: Simplified 3-step workflow. Old tabs moved to Advanced accordion.
+const PRIMARY_TABS = [
+  { key: "tenant-doc",  label: "Tenant Recertification Doc" },
+  { key: "manager-doc", label: "Managerial Recertification Doc" },
+  { key: "combine",     label: "Combine / Final Submission" },
 ] as const;
 
-type TabKey = typeof TABS[number]["key"];
+const ADVANCED_TABS = [
+  { key: "overview",       label: "Overview" },
+  { key: "household",      label: "Household" },
+  { key: "documents",      label: "Documents" },
+  { key: "review",         label: "Checklist Review" },
+  { key: "income",         label: "Income" },
+  { key: "assets",         label: "Assets / Deposits" },
+  { key: "rent",           label: "Rent + Utility" },
+  { key: "clarifications", label: "Clarifications" },
+  { key: "audit",          label: "Audit Trail" },
+] as const;
+
+type PrimaryTabKey = typeof PRIMARY_TABS[number]["key"];
+type AdvancedTabKey = typeof ADVANCED_TABS[number]["key"];
+type TabKey = PrimaryTabKey | AdvancedTabKey;
 
 const STATUS_LABEL: Record<RecertCaseStatus, string> = {
   not_started: "Not Started",
@@ -189,7 +201,8 @@ export default function RecertCaseDetailPage() {
   const params = useParams();
   const caseId = typeof params.caseId === "string" ? params.caseId : Array.isArray(params.caseId) ? params.caseId[0] : "";
 
-  const [activeTab, setActiveTab] = useState<TabKey>("overview");
+  const [activeTab, setActiveTab] = useState<TabKey>("tenant-doc");
+  const [showAdvanced, setShowAdvanced] = useState(false);
   const [recertCase, setRecertCase] = useState<RecertificationCase | null>(null);
   const [members, setMembers] = useState<RecertHouseholdMember[]>([]);
   const [documents, setDocuments] = useState<RecertDocument[]>([]);
@@ -358,6 +371,12 @@ export default function RecertCaseDetailPage() {
   const missingCount = requiredItems.filter(r => r.status === "missing" || r.status === "needs_clarification").length;
   const draftEmail = buildSubmissionEmailDraft(recertCase);
 
+  // Navigate to a tab, collapsing advanced section if navigating to a primary tab
+  function navigateTo(tab: TabKey) {
+    setActiveTab(tab);
+    if (PRIMARY_TABS.some(t => t.key === tab)) setShowAdvanced(false);
+  }
+
   // ── Render ─────────────────────────────────────────────────────────────────
 
   return (
@@ -412,45 +431,421 @@ export default function RecertCaseDetailPage() {
         </div>
       </div>
 
-      {/* Tab bar */}
+      {/* Tab bar — Sprint 23: 3 primary steps + Advanced accordion */}
       <div className="bg-white border-b border-gray-200 px-6">
         <div className="max-w-7xl mx-auto">
-          <nav className="-mb-px flex gap-1 overflow-x-auto">
-            {TABS.map(tab => (
+          {/* Primary workflow tabs */}
+          <nav className="-mb-px flex items-center gap-1 overflow-x-auto">
+            {PRIMARY_TABS.map(tab => (
               <button
                 key={tab.key}
-                onClick={() => setActiveTab(tab.key)}
-                className={`whitespace-nowrap px-3 py-3 text-sm font-medium border-b-2 transition-colors ${
-                  activeTab === tab.key
+                onClick={() => { setActiveTab(tab.key); setShowAdvanced(false); }}
+                className={`whitespace-nowrap px-4 py-3 text-sm font-semibold border-b-2 transition-colors ${
+                  (activeTab as string) === tab.key
                     ? "border-blue-600 text-blue-600"
                     : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
                 }`}
               >
+                {tab.key === "tenant-doc"  ? "1. " : tab.key === "manager-doc" ? "2. " : "3. "}
                 {tab.label}
-                {tab.key === "review" && aiReview?.reviewStatus === "not_ready" && (
-                  <span className="ml-1 text-xs text-red-500">●</span>
-                )}
-                {tab.key === "documents" && missingCount > 0 && (
-                  <span className="ml-1 text-xs bg-red-100 text-red-600 rounded-full px-1.5 py-0">{missingCount}</span>
-                )}
               </button>
             ))}
+            <div className="ml-auto flex-shrink-0 border-l border-gray-200 pl-3">
+              <button
+                onClick={() => {
+                  const isAdv = ADVANCED_TABS.some(t => t.key === activeTab);
+                  if (showAdvanced || isAdv) {
+                    setShowAdvanced(false);
+                    if (isAdv) setActiveTab("tenant-doc");
+                  } else {
+                    setShowAdvanced(true);
+                    setActiveTab("overview");
+                  }
+                }}
+                className={`whitespace-nowrap px-3 py-3 text-xs font-medium border-b-2 transition-colors ${
+                  showAdvanced || ADVANCED_TABS.some(t => t.key === activeTab)
+                    ? "border-slate-400 text-slate-600"
+                    : "border-transparent text-slate-400 hover:text-slate-600"
+                }`}
+              >
+                Advanced / Audit Details {(showAdvanced || ADVANCED_TABS.some(t => t.key === activeTab)) ? "▲" : "▼"}
+              </button>
+            </div>
           </nav>
+          {/* Advanced tab bar — shown when expanded or when an advanced tab is active */}
+          {(showAdvanced || ADVANCED_TABS.some(t => t.key === activeTab)) && (
+            <nav className="-mb-px flex gap-1 overflow-x-auto border-t border-slate-100 pt-0.5 bg-slate-50">
+              {ADVANCED_TABS.map(tab => (
+                <button
+                  key={tab.key}
+                  onClick={() => setActiveTab(tab.key)}
+                  className={`whitespace-nowrap px-3 py-2 text-xs font-medium border-b-2 transition-colors ${
+                    activeTab === tab.key
+                      ? "border-slate-600 text-slate-700 bg-white"
+                      : "border-transparent text-gray-400 hover:text-gray-600 hover:border-gray-300"
+                  }`}
+                >
+                  {tab.label}
+                  {tab.key === "review" && aiReview?.reviewStatus === "not_ready" && (
+                    <span className="ml-1 text-xs text-red-500">●</span>
+                  )}
+                  {tab.key === "documents" && missingCount > 0 && (
+                    <span className="ml-1 text-xs bg-red-100 text-red-600 rounded-full px-1.5 py-0">{missingCount}</span>
+                  )}
+                </button>
+              ))}
+            </nav>
+          )}
         </div>
       </div>
 
       {/* Tab content */}
       <div className="max-w-7xl mx-auto px-6 py-6">
-        {activeTab === "overview"  && <OverviewTab {...{ recertCase, score, members, requiredItems, incomeSources, aiReview, missingCount, saving, handleStatusChange, setActiveTab }} />}
-        {activeTab === "household" && <HouseholdTab {...{ members, saving, setSaving, caseId, setMembers, loadAll }} />}
-        {activeTab === "documents" && <DocumentsTab {...{ documents, requiredItems, saving, setSaving, caseId, setDocuments, toggleRequiredItem }} />}
-        {activeTab === "review"    && <ReviewTab {...{ aiReview, reviewRunning, handleRunReview, setActiveTab }} />}
-        {activeTab === "income"    && <IncomeTab {...{ incomeSources, saving, handleApproveIncome }} />}
-        {activeTab === "assets"    && <AssetsTab {...{ assetAccounts, depositReviews, saving, setSaving, setDepositReviews }} />}
-        {activeTab === "rent"      && <RentTab {...{ utilityAllowance, saving, setSaving, caseId, setUtilityAllowance, logAuditEvent: (t: string, s: string) => logAuditEvent(caseId, t, s) }} />}
+        {activeTab === "tenant-doc"  && <TenantDocTab caseId={caseId} recertCase={recertCase} />}
+        {activeTab === "manager-doc" && <ManagerDocTab caseId={caseId} recertCase={recertCase} />}
+        {activeTab === "combine"     && <CombineTab {...{ caseId, recertCase, score, requiredItems, incomeSources, members, aiReview, draftEmail, saving, copySuccess, handleCopyEmail, handleMarkSubmitted }} />}
+        {activeTab === "overview"    && <OverviewTab {...{ recertCase, score, members, requiredItems, incomeSources, aiReview, missingCount, saving, handleStatusChange, setActiveTab: navigateTo }} />}
+        {activeTab === "household"   && <HouseholdTab {...{ members, saving, setSaving, caseId, setMembers, loadAll }} />}
+        {activeTab === "documents"   && <DocumentsTab {...{ documents, requiredItems, saving, setSaving, caseId, setDocuments, toggleRequiredItem }} />}
+        {activeTab === "review"      && <ReviewTab {...{ aiReview, reviewRunning, handleRunReview, setActiveTab: navigateTo }} />}
+        {activeTab === "income"      && <IncomeTab {...{ incomeSources, saving, handleApproveIncome }} />}
+        {activeTab === "assets"      && <AssetsTab {...{ assetAccounts, depositReviews, saving, setSaving, setDepositReviews }} />}
+        {activeTab === "rent"        && <RentTab {...{ utilityAllowance, saving, setSaving, caseId, setUtilityAllowance, logAuditEvent: (t: string, s: string) => logAuditEvent(caseId, t, s) }} />}
         {activeTab === "clarifications" && <ClarificationsTab {...{ clarifications, aiReview, recertCase, saving, setClarifications, handleSendClarification, caseId }} />}
-        {activeTab === "submission" && <SubmissionTab {...{ recertCase, score, requiredItems, incomeSources, members, aiReview, draftEmail, saving, copySuccess, handleCopyEmail, handleMarkSubmitted }} />}
-        {activeTab === "audit"     && <AuditTab {...{ auditEvents }} />}
+        {activeTab === "audit"       && <AuditTab {...{ auditEvents }} />}
+      </div>
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// Sprint 23: Primary Workflow Tabs
+// ════════════════════════════════════════════════════════════════════════════
+
+type SessionRow = { status: string; submitted_at?: string; submitted_by?: string } | null;
+
+function TenantDocTab({ caseId, recertCase }: { caseId: string; recertCase: RecertificationCase }) {
+  const [session, setSession] = useState<SessionRow>(null);
+  useEffect(() => {
+    loadSession(caseId, "tenant").then(s => setSession(s as SessionRow));
+  }, [caseId]);
+  const submitted = session?.status === "submitted";
+
+  return (
+    <div className="space-y-5 max-w-3xl">
+      <div className={`rounded-xl border px-5 py-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4 ${submitted ? "bg-emerald-50 border-emerald-200" : "bg-slate-50 border-slate-200"}`}>
+        <div>
+          <div className="text-sm font-semibold text-slate-800">
+            {submitted ? "✓ Tenant form submitted" : "Tenant form not yet submitted"}
+          </div>
+          {session?.submitted_at && (
+            <div className="text-xs text-slate-500 mt-0.5">
+              Submitted {fmtDateTime(session.submitted_at)}{session.submitted_by ? ` by ${session.submitted_by}` : ""}
+            </div>
+          )}
+          {!session && <div className="text-xs text-slate-400 mt-0.5">No session yet — form not started</div>}
+        </div>
+        <a
+          href={`/recertification/${caseId}/tenant-doc`}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="flex-shrink-0 px-5 py-2.5 bg-emerald-700 hover:bg-emerald-800 text-white text-sm font-semibold rounded-lg"
+        >
+          Open Tenant Recertification Doc →
+        </a>
+      </div>
+      <p className="text-sm text-slate-600">
+        The tenant completes their portion of the LAHD recertification questionnaire online.
+        Staff can also use the offline workflow below for tenants without reliable internet access.
+      </p>
+      <OfflineTenantFormPanel caseId={caseId} />
+    </div>
+  );
+}
+
+function ManagerDocTab({ caseId, recertCase }: { caseId: string; recertCase: RecertificationCase }) {
+  const [session, setSession] = useState<SessionRow>(null);
+  useEffect(() => {
+    loadSession(caseId, "manager").then(s => setSession(s as SessionRow));
+  }, [caseId]);
+  const submitted = session?.status === "submitted";
+
+  return (
+    <div className="space-y-5 max-w-3xl">
+      <div className={`rounded-xl border px-5 py-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4 ${submitted ? "bg-emerald-50 border-emerald-200" : "bg-slate-50 border-slate-200"}`}>
+        <div>
+          <div className="text-sm font-semibold text-slate-800">
+            {submitted ? "✓ Manager form submitted" : "Manager form not yet submitted"}
+          </div>
+          {session?.submitted_at && (
+            <div className="text-xs text-slate-500 mt-0.5">
+              Submitted {fmtDateTime(session.submitted_at)}{session.submitted_by ? ` by ${session.submitted_by}` : ""}
+            </div>
+          )}
+          {!session && <div className="text-xs text-slate-400 mt-0.5">No session yet — form not started</div>}
+        </div>
+        <a
+          href={`/recertification/${caseId}/manager-doc`}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="flex-shrink-0 px-5 py-2.5 bg-sky-700 hover:bg-sky-800 text-white text-sm font-semibold rounded-lg"
+        >
+          Open Managerial Recertification Doc →
+        </a>
+      </div>
+      <p className="text-sm text-slate-600">
+        The property manager or authorized agent completes the owner/agent portions of the LAHD recertification.
+        This includes rent determination, compliance certifications, and manager signatures.
+      </p>
+    </div>
+  );
+}
+
+function CombineTab({
+  caseId, recertCase, score, requiredItems, incomeSources, members, aiReview,
+  draftEmail, saving, copySuccess, handleCopyEmail, handleMarkSubmitted,
+}: {
+  caseId: string;
+  recertCase: RecertificationCase;
+  score: number;
+  requiredItems: RecertRequiredItem[];
+  incomeSources: RecertIncomeSource[];
+  members: RecertHouseholdMember[];
+  aiReview: RecertAiReview | null;
+  draftEmail: { subject: string; body: string; to: string };
+  saving: boolean;
+  copySuccess: boolean;
+  handleCopyEmail: () => Promise<void>;
+  handleMarkSubmitted: () => Promise<void>;
+}) {
+  const { profile, authUser } = useAuth();
+  const [tenantSession, setTenantSession] = useState<SessionRow>(null);
+  const [managerSession, setManagerSession] = useState<SessionRow>(null);
+  const [pdfUrl, setPdfUrl] = useState<string | null>(null);
+  const [generating, setGenerating] = useState(false);
+  const [pdfError, setPdfError] = useState<string | null>(null);
+  const [filledCount, setFilledCount] = useState(0);
+  const [blankCount, setBlankCount] = useState(0);
+
+  useEffect(() => {
+    loadSession(caseId, "tenant").then(s => setTenantSession(s as SessionRow));
+    loadSession(caseId, "manager").then(s => setManagerSession(s as SessionRow));
+  }, [caseId]);
+
+  async function handleGenerate() {
+    setGenerating(true); setPdfError(null);
+    try {
+      const sb = getSupabase();
+      const token = sb ? (await sb.auth.getSession()).data.session?.access_token : null;
+      const res = await fetch(`/api/recertification/${caseId}/generate-exact-form`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({
+          managerName: profile?.full_name ?? authUser?.email,
+          managerEmail: authUser?.email,
+        }),
+      });
+      if (!res.ok) throw new Error(`Generate failed (${res.status}): ${(await res.text()).slice(0, 200)}`);
+      const blob = await res.blob();
+      setPdfUrl(URL.createObjectURL(blob));
+      setFilledCount(Number(res.headers.get("X-Filled-Count") ?? 0));
+      setBlankCount(Number(res.headers.get("X-Blank-Count") ?? 0));
+    } catch (e) {
+      setPdfError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setGenerating(false);
+    }
+  }
+
+  const tenantSubmitted = tenantSession?.status === "submitted";
+  const managerSubmitted = managerSession?.status === "submitted";
+  const adults = members.filter(m => m.isAdult);
+  const allSigned = adults.every(m => m.ticqSigned && m.applicantStatementSigned && m.conflictOfInterestSigned);
+  const allItemsComplete = requiredItems.every(r => r.status === "complete" || r.status === "not_applicable");
+  const allIncomeApproved = incomeSources.every(s => s.managerApproved);
+
+  const blockers: string[] = [
+    !tenantSubmitted ? "Tenant recertification form not yet submitted" : null,
+    !managerSubmitted ? "Managerial recertification form not yet submitted" : null,
+    !allSigned ? "Missing adult household signatures (TICQ, Applicant Statement, COI)" : null,
+    !allItemsComplete ? "Not all required checklist items are complete" : null,
+    !allIncomeApproved ? "Not all income sources are manager-approved" : null,
+  ].filter(Boolean) as string[];
+
+  const safeName = (s: string) => s.replace(/[^a-z0-9]/gi, "_").replace(/_+/g, "_").replace(/^_|_$/g, "");
+  const downloadFilename = `LAHD-recert-${safeName(recertCase.primaryTenantName ?? "Tenant")}-unit-${safeName(recertCase.unitNumber ?? "0")}-FINAL-SUBMISSION.pdf`;
+
+  return (
+    <div className="space-y-6">
+      {/* Step status */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        {[
+          { label: "Tenant Recertification Doc", session: tenantSession, href: `/recertification/${caseId}/tenant-doc`, color: "emerald" as const },
+          { label: "Managerial Recertification Doc", session: managerSession, href: `/recertification/${caseId}/manager-doc`, color: "sky" as const },
+        ].map(({ label, session, href, color }) => {
+          const done = session?.status === "submitted";
+          const bg = done ? (color === "emerald" ? "bg-emerald-50 border-emerald-200" : "bg-sky-50 border-sky-200") : "bg-slate-50 border-slate-200";
+          return (
+            <div key={label} className={`rounded-xl border px-4 py-3 flex items-center justify-between gap-3 ${bg}`}>
+              <div>
+                <div className={`text-xs font-semibold ${done ? (color === "emerald" ? "text-emerald-800" : "text-sky-800") : "text-slate-600"}`}>
+                  {done ? "✓" : "○"} {label}
+                </div>
+                <div className="text-[11px] text-slate-400 mt-0.5">
+                  {done ? `Submitted ${fmtDateTime(session?.submitted_at ?? "")}` : "Not yet submitted"}
+                </div>
+              </div>
+              {!done && (
+                <a href={href} target="_blank" rel="noopener noreferrer"
+                  className="flex-shrink-0 text-xs px-3 py-1.5 rounded-lg border border-slate-300 text-slate-600 hover:border-slate-500 bg-white">
+                  Open →
+                </a>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Offline tenant form import */}
+      <OfflineTenantFormPanel caseId={caseId} />
+
+      {/* Blockers */}
+      {blockers.length > 0 && (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-4">
+          <h3 className="text-sm font-bold text-amber-900 mb-2">
+            ⚠ Resolve before generating the final PDF:
+          </h3>
+          <ul className="space-y-1">
+            {blockers.map(b => (
+              <li key={b} className="flex items-start gap-2 text-sm text-amber-800">
+                <span className="text-amber-400 mt-0.5 flex-shrink-0">○</span>{b}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {/* Generate PDF */}
+      <div className={`rounded-xl border-2 px-5 py-4 ${blockers.length === 0 ? "border-emerald-300 bg-emerald-50" : "border-slate-200 bg-white"}`}>
+        <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
+          <div>
+            <h3 className={`text-base font-bold ${blockers.length === 0 ? "text-emerald-900" : "text-slate-800"}`}>
+              Generate Final LAHD Submission Packet
+            </h3>
+            <p className="text-xs text-slate-600 mt-1 max-w-2xl">
+              Merges tenant + manager answers into the official LAHD recertification PDF using the original AcroForm
+              field names. Embeds signatures in all required official signature locations.
+              Output file: <code className="font-mono text-slate-700">{downloadFilename}</code>
+            </p>
+            {blockers.length > 0 && (
+              <p className="text-[11px] text-amber-700 mt-1 italic">
+                {blockers.length} item{blockers.length === 1 ? "" : "s"} above incomplete — PDF will be missing data if generated now.
+              </p>
+            )}
+          </div>
+          <button
+            onClick={handleGenerate}
+            disabled={generating}
+            className="flex-shrink-0 px-6 py-2.5 bg-emerald-700 hover:bg-emerald-800 text-white text-sm font-bold rounded-lg disabled:opacity-50"
+          >
+            {generating ? "Generating…" : "Generate Final PDF"}
+          </button>
+        </div>
+      </div>
+
+      {pdfError && (
+        <div className="rounded-lg border border-rose-300 bg-rose-50 p-3 text-sm text-rose-900 font-mono whitespace-pre-wrap">{pdfError}</div>
+      )}
+
+      {/* PDF preview + download */}
+      {pdfUrl && (
+        <div className="space-y-3">
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <div className="text-sm font-semibold text-emerald-700">
+              ✓ PDF ready — {filledCount} fields filled · {blankCount} blanks
+            </div>
+            <a
+              href={pdfUrl}
+              download={downloadFilename}
+              className="px-5 py-2.5 bg-emerald-700 hover:bg-emerald-800 text-white text-sm font-bold rounded-lg"
+            >
+              Download Final Submission PDF ↓
+            </a>
+          </div>
+          <div className="border border-slate-200 rounded-xl overflow-hidden shadow-sm">
+            <iframe src={pdfUrl} className="w-full" style={{ height: "80vh", border: 0 }} title="Final LAHD Submission PDF" />
+          </div>
+        </div>
+      )}
+
+      {/* Readiness gate */}
+      <div className={`rounded-xl border px-4 py-4 ${score >= 100 ? "bg-green-50 border-green-200" : "bg-amber-50 border-amber-200"}`}>
+        <div className="flex items-start justify-between gap-4 flex-wrap">
+          <div>
+            <h3 className={`text-sm font-bold ${score >= 100 ? "text-green-800" : "text-amber-800"}`}>
+              {score >= 100 ? "✓ Package appears ready for submission" : "⚠ Package not ready — resolve items above"}
+            </h3>
+            <p className="text-xs text-gray-600 mt-1">
+              Readiness score: <strong>{score}%</strong>.
+              Incomplete packages will not be reviewed. Complete packages receive a determination within 10 business days.
+            </p>
+          </div>
+          {readinessBar(score)}
+        </div>
+      </div>
+
+      {/* Submission email draft */}
+      <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+        <div className="px-4 py-3 border-b border-gray-100 bg-gray-50 flex items-center justify-between">
+          <h3 className="text-sm font-semibold text-gray-700">Submission Email Draft</h3>
+          <button
+            onClick={handleCopyEmail}
+            className={`text-xs px-3 py-1.5 rounded-lg border font-medium transition-colors ${copySuccess ? "bg-green-50 text-green-700 border-green-200" : "bg-white text-gray-600 border-gray-200 hover:border-gray-400"}`}
+          >
+            {copySuccess ? "✓ Copied!" : "Copy to Clipboard"}
+          </button>
+        </div>
+        <div className="p-4 space-y-3 text-sm">
+          <div className="flex gap-2">
+            <span className="text-gray-400 w-14 flex-shrink-0">To:</span>
+            <span className="font-mono text-blue-700 font-semibold">{draftEmail.to}</span>
+          </div>
+          <div className="flex gap-2">
+            <span className="text-gray-400 w-14 flex-shrink-0">Subject:</span>
+            <span className="text-gray-800 font-medium">{draftEmail.subject}</span>
+          </div>
+          <div className="border-t border-gray-100 pt-3">
+            <pre className="text-xs text-gray-700 whitespace-pre-wrap font-sans leading-relaxed bg-gray-50 rounded-lg p-3 border border-gray-100">
+              {draftEmail.body}
+            </pre>
+          </div>
+        </div>
+      </div>
+
+      {/* Mark submitted */}
+      <div className="flex items-center justify-between gap-4 flex-wrap">
+        <div className="text-sm text-gray-600">
+          {recertCase.submittedAt
+            ? `Submitted on ${fmtDateTime(recertCase.submittedAt)}`
+            : "When you have sent the email and attached all documents, mark the case as submitted."}
+        </div>
+        {recertCase.caseStatus !== "submitted" && recertCase.caseStatus !== "approved" && (
+          <button
+            onClick={handleMarkSubmitted}
+            disabled={saving}
+            className={`px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold rounded-lg transition-colors ${saving ? "opacity-50 cursor-not-allowed" : ""}`}
+          >
+            {saving ? "Saving…" : "Mark as Submitted"}
+          </button>
+        )}
+        {(recertCase.caseStatus === "submitted" || recertCase.caseStatus === "approved") && (
+          <span className="text-sm font-semibold text-emerald-600">
+            ✓ {recertCase.caseStatus === "approved" ? "Approved" : "Submitted"}
+          </span>
+        )}
       </div>
     </div>
   );
@@ -587,7 +982,7 @@ function OverviewTab({
             { label: "Check Assets", tab: "assets" as TabKey },
             { label: "Rent + Utility Calc", tab: "rent" as TabKey },
             { label: "Generate Clarification", tab: "clarifications" as TabKey },
-            { label: "Prepare Submission", tab: "submission" as TabKey },
+            { label: "Combine & Submit", tab: "combine" as TabKey },
           ].map(a => (
             <button
               key={a.tab}
