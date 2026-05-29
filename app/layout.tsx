@@ -6,6 +6,7 @@ import TopBar from "@/components/TopBar";
 import ZenSeedBootstrap from "@/components/ZenSeedBootstrap";
 import { SourceLedgerProvider } from "@/components/SourceLedgerProvider";
 import { AuthProvider } from "@/components/AuthProvider";
+import AppGate from "@/components/AppGate";
 
 export const metadata: Metadata = {
   title: "BaxterOps — Competitive Intelligence + Recertification",
@@ -30,7 +31,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             <Sidebar />
             <div className="flex-1 min-w-0 flex flex-col">
               <TopBar />
-              <main className="p-8 flex-1">{children}</main>
+              <main className="p-8 flex-1"><AppGate>{children}</AppGate></main>
             </div>
           </div>
           </SourceLedgerProvider>

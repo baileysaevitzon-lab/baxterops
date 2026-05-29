@@ -1,24 +1,29 @@
 "use client";
 // Sprint 7 — real Supabase Auth.
+// Sprint 22 — added approval_status gating: new accounts are pending/inactive
+//             until an admin sets approval_status='approved' and is_active=true.
 //
 // Wraps the app. Tracks the current Supabase session and the user's
-// role from public.user_profiles. Exposes:
+// role + approval status from public.user_profiles. Exposes:
 //   - authUser: session user or null
 //   - profile: user_profiles row or null
 //   - signedIn: boolean
+//   - isApproved: boolean (approved + active profile)
+//   - approvalStatus: "pending" | "approved" | "rejected" | null
 //   - signIn(email, password)
 //   - signUp(email, password, full_name)
 //   - signOut()
 //   - dbRole(): "admin" | "manager" | "leasing" | "analyst" | "viewer" | null
 //
-// The OLD `<RoleProvider>` mock switcher still exists and continues to drive UI
-// preview only. Real RBAC for Supabase RLS comes from this AuthProvider.
+// The <RoleProvider> mock switcher still exists for UI preview only.
+// Real RBAC + approval gating come from this AuthProvider.
 
 import { createContext, useCallback, useContext, useEffect, useState, ReactNode } from "react";
 import { getSupabase } from "@/lib/supabase/client";
 import type { Session, User } from "@supabase/supabase-js";
 
 export type DbRole = "admin" | "manager" | "leasing" | "analyst" | "viewer";
+export type ApprovalStatus = "pending" | "approved" | "rejected";
 
 interface Profile {
   id: string;
@@ -26,6 +31,7 @@ interface Profile {
   full_name: string | null;
   role: DbRole;
   is_active: boolean;
+  approval_status: ApprovalStatus;
 }
 
 interface Ctx {
@@ -34,6 +40,8 @@ interface Ctx {
   profile: Profile | null;
   loading: boolean;
   signedIn: boolean;
+  isApproved: boolean;
+  approvalStatus: ApprovalStatus | null;
   signIn: (email: string, password: string) => Promise<{ error?: string }>;
   signUp: (email: string, password: string, fullName: string) => Promise<{ error?: string }>;
   signOut: () => Promise<void>;
@@ -50,9 +58,32 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const refreshProfile = useCallback(async (userId: string) => {
     const sb = getSupabase();
     if (!sb) return;
-    const { data, error } = await sb.from("user_profiles").select("*").eq("id", userId).maybeSingle();
+    const { data, error } = await sb
+      .from("user_profiles")
+      .select("*")
+      .eq("id", userId)
+      .maybeSingle();
     if (error) { console.warn("[Auth] profile load:", error.message); setProfile(null); return; }
-    setProfile(data as Profile | null);
+    if (data) { setProfile(data as Profile); return; }
+
+    // No profile row found — create one (trigger should have done this, but
+    // this is a client-side fallback for existing users who predate the trigger).
+    const { data: userData } = await sb.auth.getUser();
+    if (userData?.user) {
+      const { data: newProfile, error: insErr } = await sb
+        .from("user_profiles")
+        .insert({
+          id: userId,
+          email: userData.user.email ?? "",
+          full_name: null,
+          role: "viewer",
+          is_active: false,
+          approval_status: "pending",
+        })
+        .select("*")
+        .maybeSingle();
+      if (!insErr && newProfile) setProfile(newProfile as Profile);
+    }
   }, []);
 
   useEffect(() => {
@@ -61,8 +92,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     sb.auth.getSession().then(({ data }) => {
       setSession(data.session);
       if (data.session?.user) refreshProfile(data.session.user.id);
-      // Sprint 12: tell the realtime client about the JWT so RLS-protected
-      // postgres_changes subscriptions actually receive events.
       if (data.session?.access_token) {
         sb.realtime.setAuth(data.session.access_token);
       }
@@ -72,8 +101,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setSession(sess);
       if (sess?.user) refreshProfile(sess.user.id);
       else setProfile(null);
-      // Re-apply realtime auth on every session change so newly-subscribed
-      // channels (e.g. /sync-test mounting after sign-in) get a valid JWT.
       if (sb.realtime && sess?.access_token) {
         sb.realtime.setAuth(sess.access_token);
       }
@@ -92,8 +119,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const signUp: Ctx["signUp"] = useCallback(async (email, password, fullName) => {
     const sb = getSupabase();
     if (!sb) return { error: "Supabase not configured" };
-    const { error } = await sb.auth.signUp({ email, password, options: { data: { full_name: fullName } } });
+    const trimmedName = fullName.trim() || null;
+    const { error } = await sb.auth.signUp({
+      email,
+      password,
+      options: { data: { full_name: trimmedName } },
+    });
     if (error) return { error: error.message };
+    // The DB trigger (handle_new_user) auto-creates the profile row with
+    // role='viewer', is_active=false, approval_status='pending'.
+    // No further action needed here.
     return {};
   }, []);
 
@@ -106,6 +141,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const dbRole = useCallback(() => profile?.role ?? null, [profile]);
 
+  const isApproved = Boolean(
+    profile?.is_active && profile?.approval_status === "approved"
+  );
+  const approvalStatus: ApprovalStatus | null = profile?.approval_status ?? null;
+
   return (
     <AuthCtx.Provider value={{
       authUser: session?.user ?? null,
@@ -113,6 +153,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       profile,
       loading,
       signedIn: Boolean(session?.user),
+      isApproved,
+      approvalStatus,
       signIn, signUp, signOut, dbRole,
     }}>
       {children}
