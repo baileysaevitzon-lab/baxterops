@@ -31,7 +31,7 @@ export default function LoginPage() {
     setBusy(false);
     if (r.error) { setMsg(r.error); return; }
     if (mode === "sign_in") {
-      router.push("/");
+      router.push("/baxter");
     } else {
       setMsg("Account created. Check your email to confirm, then sign in here. Note: an admin must also approve your account before you can access BaxterOps.");
     }
@@ -66,7 +66,7 @@ export default function LoginPage() {
             <div className="flex gap-2">
               {approvalStatus === "approved" && (
                 <button
-                  onClick={() => router.push("/")}
+                  onClick={() => router.push("/baxter")}
                   className="px-3 py-1.5 rounded bg-slate-900 text-white text-sm"
                 >
                   Go to dashboard

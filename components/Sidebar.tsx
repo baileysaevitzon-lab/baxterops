@@ -6,7 +6,7 @@ const sections = [
   {
     label: "Intelligence",
     items: [
-      { href: "/", label: "Executive Dashboard" },
+      { href: "/baxter", label: "Executive Dashboard" },
       { href: "/baxter-units", label: "Baxter Units" },
       { href: "/competitors", label: "Competitor Database" },
       { href: "/competitor-intelligence", label: "Competitor Intelligence" },
@@ -62,6 +62,8 @@ export default function Sidebar() {
   const pathname = usePathname();
   // Sprint 21: hide the staff sidebar on the public token-gated tenant form.
   if (pathname?.startsWith("/recertification/tenant/")) return null;
+  // Sprint 25: hide on the public SGD Operations Portal landing page.
+  if (pathname === "/") return null;
   return (
     <aside className="w-64 shrink-0 border-r border-slate-200 bg-white min-h-screen">
       <div className="p-5 border-b border-slate-200">

@@ -9,6 +9,7 @@ import { list, upsert, upsertMany, where, findById, remove } from "./persistence
 import { TABLES } from "./tables";
 import type {
   RecertificationCase,
+  RecertCaseStatus,
   RecertHouseholdMember,
   RecertDocument,
   RecertRequiredItem,
@@ -19,6 +20,7 @@ import type {
   RecertAiReview,
   RecertClarificationRequest,
   RecertAuditEvent,
+  DataSourceLedgerRow,
 } from "@/lib/types";
 
 // ── Cases ────────────────────────────────────────────────────────────────────
@@ -38,6 +40,85 @@ export async function saveCase(c: RecertificationCase): Promise<RecertificationC
 
 export async function deleteCase(id: string): Promise<void> {
   return remove(TABLES.recertificationCases, id);
+}
+
+/**
+ * Sprint 24 — Manual status override from a staff-facing list view.
+ *
+ * Persists the new case_status to recertification_cases, writes a per-case
+ * audit event (who/when), and a best-effort provenance ledger row tagged with
+ * the manual source_type. Audit + ledger writes are non-fatal: a logging
+ * failure never blocks the status save. This is the canonical "human edits a
+ * status outside the automated flow" path — automated/connector code must
+ * never silently overwrite a value written here (it should open a Source
+ * Conflict / Verification Queue item instead).
+ *
+ * `sourceType`:
+ *   - "manual_override"  = staff manually corrected a fact
+ *   - "manager_update"   = a manager made/approved a decision
+ */
+export async function updateCaseStatus(
+  theCase: RecertificationCase,
+  newStatus: RecertCaseStatus,
+  actor?: string,
+  sourceType: "manual_override" | "manager_update" = "manual_override",
+): Promise<RecertificationCase> {
+  const prev = theCase.caseStatus;
+  if (prev === newStatus) return theCase;
+
+  const updated = await saveCase({ ...theCase, caseStatus: newStatus });
+
+  // Audit (who/when) — non-fatal.
+  try {
+    await logAuditEvent(
+      theCase.id,
+      "status_change",
+      `Case status manually changed: ${prev} → ${newStatus}`,
+      actor,
+      { from: prev, to: newStatus, via: sourceType },
+    );
+  } catch (e) {
+    console.warn("[updateCaseStatus] audit event failed (non-fatal):", e);
+  }
+
+  // Provenance ledger — non-fatal.
+  try {
+    const now = new Date().toISOString();
+    const row: DataSourceLedgerRow = {
+      id: `led-recert-${theCase.id}-case_status-${Date.now()}`,
+      entityType: "recert_case",
+      entityId: theCase.id,
+      entityName: theCase.primaryTenantName,
+      fieldKey: "case_status",
+      fieldLabel: "Recertification case status",
+      fieldCategory: "status",
+      valueType: "text",
+      valueText: newStatus,
+      displayValue: newStatus,
+      pageRoutes: [
+        "/recertification/tenant-form",
+        "/recertification/manager-form",
+        `/recertification/${theCase.id}`,
+      ],
+      sourceType,
+      sourceName: `Manual ${sourceType === "manager_update" ? "manager update" : "override"} by ${actor ?? "staff"}`,
+      sourceDate: now.slice(0, 10),
+      collectedBy: actor,
+      lastVerifiedAt: now,
+      verifiedBy: actor,
+      verificationStatus: "verified",
+      confidence: "high",
+      entryMethod: "manual_user_entry",
+      requiresManualVerification: false,
+      staleAfterDays: 90,
+      updatedAt: now,
+    };
+    await upsert<DataSourceLedgerRow>(TABLES.dataSourceLedger, row);
+  } catch (e) {
+    console.warn("[updateCaseStatus] provenance ledger write failed (non-fatal):", e);
+  }
+
+  return updated;
 }
 
 // ── Household Members ────────────────────────────────────────────────────────
@@ -68,6 +149,107 @@ export async function saveDocument(d: RecertDocument): Promise<RecertDocument> {
 
 export async function deleteDocument(id: string): Promise<void> {
   return remove(TABLES.recertDocuments, id);
+}
+
+/**
+ * Sprint 24 — Manual supporting-document status override from the compiler.
+ *
+ * Persists the new verification_status to recert_documents (spreading the
+ * existing row so uploaded file metadata / storage_path are never lost — and
+ * no file is deleted), writes a per-case audit event, and a best-effort
+ * provenance ledger row. Audit + ledger are non-fatal.
+ *
+ * `sourceType`:
+ *   - "manager_update"  for review decisions (reviewed/accepted/rejected/needs_clarification)
+ *   - "manual_override" for clerical states (missing/received/pending_review)
+ *
+ * Connector-readiness: a future Gmail/Drive/Zapier ingestion must write
+ * `connector_suggested`/`scraped_unverified` rows and must NOT overwrite a
+ * status set here — on mismatch it should open a Source Conflict / Verification
+ * Queue item instead.
+ */
+export async function updateDocumentStatus(
+  doc: RecertDocument,
+  newStatus: RecertDocument["verificationStatus"],
+  actor?: string,
+  sourceType: "manual_override" | "manager_update" = "manual_override",
+): Promise<RecertDocument> {
+  const prev = doc.verificationStatus;
+  if (prev === newStatus) return doc;
+
+  const updated = await saveDocument({ ...doc, verificationStatus: newStatus });
+
+  try {
+    await logAuditEvent(
+      doc.caseId,
+      "document_status_change",
+      `Document "${doc.fileName ?? doc.id}" status: ${prev} → ${newStatus}`,
+      actor,
+      { documentId: doc.id, documentType: doc.documentType, from: prev, to: newStatus, via: sourceType },
+    );
+  } catch (e) {
+    console.warn("[updateDocumentStatus] audit event failed (non-fatal):", e);
+  }
+
+  try {
+    const now = new Date().toISOString();
+    const row: DataSourceLedgerRow = {
+      id: `led-recdoc-${doc.id}-status-${Date.now()}`,
+      entityType: "recert_document",
+      entityId: doc.id,
+      entityName: doc.fileName ?? doc.id,
+      fieldKey: "verification_status",
+      fieldLabel: "Supporting document status",
+      fieldCategory: "status",
+      valueType: "text",
+      valueText: newStatus,
+      displayValue: newStatus,
+      pageRoutes: [`/recertification/compiler/${doc.caseId}`],
+      sourceType,
+      sourceName: `Manual ${sourceType === "manager_update" ? "manager review" : "override"} by ${actor ?? "staff"}`,
+      sourceDate: now.slice(0, 10),
+      collectedBy: actor,
+      lastVerifiedAt: now,
+      verifiedBy: actor,
+      verificationStatus: "verified",
+      confidence: "high",
+      entryMethod: "manual_user_entry",
+      requiresManualVerification: false,
+      staleAfterDays: 90,
+      updatedAt: now,
+    };
+    await upsert<DataSourceLedgerRow>(TABLES.dataSourceLedger, row);
+  } catch (e) {
+    console.warn("[updateDocumentStatus] provenance ledger write failed (non-fatal):", e);
+  }
+
+  return updated;
+}
+
+/**
+ * Sprint 24 — Inline note on a supporting document (free-text, messy-situation
+ * field, e.g. "tenant emailed bank statement, missing page 2"). Saves to
+ * recert_documents.notes (preserving all other metadata) + a light audit event.
+ * No ledger row: a note is not a structured "fact".
+ */
+export async function updateDocumentNotes(
+  doc: RecertDocument,
+  notes: string,
+  actor?: string,
+): Promise<RecertDocument> {
+  const updated = await saveDocument({ ...doc, notes });
+  try {
+    await logAuditEvent(
+      doc.caseId,
+      "document_note_updated",
+      `Note updated on document "${doc.fileName ?? doc.id}"`,
+      actor,
+      { documentId: doc.id },
+    );
+  } catch (e) {
+    console.warn("[updateDocumentNotes] audit event failed (non-fatal):", e);
+  }
+  return updated;
 }
 
 // ── Required Items ───────────────────────────────────────────────────────────

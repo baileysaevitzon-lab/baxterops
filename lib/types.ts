@@ -458,7 +458,8 @@ export interface Task {
   owner: string;
   priority: 1 | 2 | 3 | 4 | 5;
   dueDate?: string;
-  status: "open" | "in_progress" | "done";
+  // Sprint 24 — added "blocked" (free-text in Supabase; no check constraint).
+  status: "open" | "in_progress" | "blocked" | "done";
   relatedUnitId?: string;
   relatedTenantId?: string;
   relatedCompetitorId?: string;
@@ -928,7 +929,11 @@ export interface RecertDocument {
   expectedPageCount?: number;
   allPagesPresent?: boolean;
   aiClassificationStatus?: string;
-  verificationStatus: "pending" | "accepted" | "needs_clarification" | "rejected";
+  // Sprint 24 — widened for the staff-facing manual document-status dropdown.
+  // Free-text in Supabase (no check constraint); "pending" kept for back-compat.
+  verificationStatus:
+    | "missing" | "received" | "pending" | "pending_review"
+    | "reviewed" | "accepted" | "needs_clarification" | "rejected";
   notes?: string;
   createdAt: string;
   updatedAt: string;

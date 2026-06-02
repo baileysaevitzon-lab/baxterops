@@ -10,6 +10,8 @@ import { fmtMoney } from "@/lib/calc";
 import { DATA_QUALITY_FLAGS } from "@/lib/dataQuality";
 import { getAllPhotoEvidence } from "@/lib/services/photoEvidence";
 import { getAllIntelligenceSummaries, CLASSIFICATION_LABELS, CLASSIFICATION_COLORS, updateSummaryNotes } from "@/lib/services/competitorIntelligence";
+import { markCompetitorVerified } from "@/lib/services/competitors";
+import { useAuth } from "@/components/AuthProvider";
 import { getSupabase } from "@/lib/supabase/client";
 import { SourceBadge } from "@/components/SourceBadge";
 import { LiveDataBanner } from "@/components/LiveDataBanner";
@@ -43,9 +45,13 @@ export default function Competitors() {
   // Sprint 13: shared toured-only state + canonical "what counts as toured" detector.
   const { touredIds, touredCount } = useTouredIds();
   const [touredOnly, setTouredOnly] = useTouredOnly();
+  const { profile, authUser } = useAuth();
 
   const [sortBy, setSortBy] = useState<"name" | "quality" | "distance" | "threat" | "verify">("quality");
   const [verifiedAt, setVerifiedAt] = useState<Record<string, string>>({});
+  // Sprint 24: per-row save state for "Mark verified now" (now persisted to Supabase).
+  const [verifyState, setVerifyState] = useState<Record<string, "saving" | "saved" | "error">>({});
+  const [verifyErr, setVerifyErr] = useState<Record<string, string>>({});
   const [tab, setTab] = useState<"all" | "queue">("all");
   const [photoCounts, setPhotoCounts] = useState<Record<string, number>>({});
   const [intelligenceSummaries, setIntelligenceSummaries] = useState<Map<string, CompetitorIntelligenceSummary>>(new Map());
@@ -97,9 +103,26 @@ export default function Competitors() {
     // on another device fires the useCompetitors realtime channel).
   }, [competitors]);
 
-  function markVerified(id: string) {
-    const ts = new Date().toISOString().slice(0, 10);
-    setVerifiedAt(v => ({ ...v, [id]: ts }));
+  // Sprint 24: persist verification to Supabase (was local-only). Writes
+  // last_verified_at + verified_by and a manual_override provenance ledger row,
+  // with per-row saving/saved/error state. Local state updates only on success.
+  async function markVerified(c: CompetitorProperty) {
+    const actor = profile?.full_name ?? authUser?.email ?? "staff";
+    const today = new Date().toISOString().slice(0, 10);
+    setVerifyState(s => ({ ...s, [c.id]: "saving" }));
+    setVerifyErr(e => { const n = { ...e }; delete n[c.id]; return n; });
+    try {
+      await markCompetitorVerified(c.id, actor);
+      setVerifiedAt(v => ({ ...v, [c.id]: today }));   // optimistic display AFTER confirmed write
+      setVerifyState(s => ({ ...s, [c.id]: "saved" }));
+      setTimeout(() => setVerifyState(s => {
+        if (s[c.id] !== "saved") return s;
+        const n = { ...s }; delete n[c.id]; return n;
+      }), 1800);
+    } catch (err) {
+      setVerifyErr(e => ({ ...e, [c.id]: err instanceof Error ? err.message : "Save failed" }));
+      setVerifyState(s => ({ ...s, [c.id]: "error" }));
+    }
   }
 
   const augmented = competitors.map(c => ({
@@ -169,7 +192,16 @@ export default function Competitors() {
                       <td>{intel ? `${intel.directThreatScore}/5` : `${c.threatLevel ?? "—"}/5`}</td>
                       <td>{cls ? <Badge intent={CLASSIFICATION_COLORS[cls]}>{CLASSIFICATION_LABELS[cls]}</Badge> : "—"}</td>
                       <td className="text-right">
-                        <button onClick={() => markVerified(c.id)} className="text-xs px-2 py-1 bg-slate-900 text-white rounded">Mark verified now</button>
+                        <span className="inline-flex items-center gap-1.5 justify-end">
+                          {verifyState[c.id] === "error" && <span className="text-[10px] text-rose-600" title={verifyErr[c.id]}>⚠</span>}
+                          <button
+                            onClick={() => markVerified(c)}
+                            disabled={verifyState[c.id] === "saving"}
+                            className="text-xs px-2 py-1 bg-slate-900 text-white rounded disabled:opacity-50"
+                          >
+                            {verifyState[c.id] === "saving" ? "saving…" : verifyState[c.id] === "saved" ? "✓ verified" : "Mark verified now"}
+                          </button>
+                        </span>
                       </td>
                     </tr>
                   );
@@ -237,7 +269,17 @@ export default function Competitors() {
                         confidence: {c.dataConfidence}
                       </Badge>
                       <span className="text-xs text-slate-500">verified {c.lastVerifiedAt ?? "never"} {c.verifiedBy ? `by ${c.verifiedBy}` : ""}</span>
-                      <button onClick={() => markVerified(c.id)} className="ml-auto text-xs px-2 py-1 border rounded text-slate-700 hover:bg-slate-50">Mark verified now</button>
+                      <span className="ml-auto inline-flex items-center gap-1.5">
+                        {verifyState[c.id] === "saved" && <span className="text-[10px] text-emerald-600">✓ saved</span>}
+                        {verifyState[c.id] === "error" && <span className="text-[10px] text-rose-600" title={verifyErr[c.id]}>⚠ failed</span>}
+                        <button
+                          onClick={() => markVerified(c)}
+                          disabled={verifyState[c.id] === "saving"}
+                          className="text-xs px-2 py-1 border rounded text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                        >
+                          {verifyState[c.id] === "saving" ? "saving…" : "Mark verified now"}
+                        </button>
+                      </span>
                     </div>
 
                     {flags.length > 0 && (

@@ -15,11 +15,14 @@
 //   - Writes broadcast via Postgres realtime to all listening tabs/devices.
 
 import { getSupabase, hasSupabaseEnv } from "@/lib/supabase/client";
+import { upsert } from "./persistence";
+import { TABLES } from "./tables";
 import type {
   CompetitorProperty,
   CompetitorUnitType,
   DataConfidence,
   CompSourceType,
+  DataSourceLedgerRow,
 } from "@/lib/types";
 import { COMPETITORS as SEED_COMPETITORS } from "@/lib/seed";
 
@@ -340,6 +343,61 @@ export async function updateCompetitorFields(
   }
 
   return rowToCompetitor(data as CompetitorRow);
+}
+
+/**
+ * Sprint 24 — "Mark verified now" persistence.
+ *
+ * Records a manual human verification: sets last_verified_at + verified_by on
+ * the competitor (real Supabase write, broadcast via realtime), and writes a
+ * data_source_ledger provenance row tagged source_type = "manual_override".
+ * The ledger write is non-fatal. Returns the updated competitor.
+ *
+ * Connector-readiness: a manually-verified competitor must NOT be silently
+ * overwritten by future Apify/Semrush/Clay data — a connector that disagrees
+ * should open a source_conflicts / manual_verification_queue item instead.
+ */
+export async function markCompetitorVerified(
+  id: string,
+  actor: string,
+): Promise<CompetitorProperty> {
+  const nowIso = new Date().toISOString();
+  const today = nowIso.slice(0, 10);
+
+  const updated = await updateCompetitorFields(id, { lastVerifiedAt: nowIso, verifiedBy: actor });
+
+  try {
+    const row: DataSourceLedgerRow = {
+      id: `led-comp-${id}-verified-${Date.now()}`,
+      entityType: "competitor",
+      entityId: id,
+      entityName: updated.name,
+      fieldKey: "last_verified_at",
+      fieldLabel: "Manually verified",
+      fieldCategory: "verification",
+      valueType: "text",
+      valueText: today,
+      displayValue: `Verified ${today}`,
+      pageRoutes: ["/competitors", `/competitors/${id.replace(/^c-/, "")}`, "/competitor-intelligence"],
+      sourceType: "manual_override",
+      sourceName: `Manually verified by ${actor}`,
+      sourceDate: today,
+      collectedBy: actor,
+      lastVerifiedAt: nowIso,
+      verifiedBy: actor,
+      verificationStatus: "verified",
+      confidence: "high",
+      entryMethod: "manual_user_entry",
+      requiresManualVerification: false,
+      staleAfterDays: 90,
+      updatedAt: nowIso,
+    };
+    await upsert<DataSourceLedgerRow>(TABLES.dataSourceLedger, row);
+  } catch (e) {
+    console.warn("[markCompetitorVerified] provenance ledger write failed (non-fatal):", e);
+  }
+
+  return updated;
 }
 
 /**

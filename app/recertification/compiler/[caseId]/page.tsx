@@ -13,6 +13,8 @@ import { useParams } from "next/navigation";
 import Link from "next/link";
 import { useAuth } from "@/components/AuthProvider";
 import { getSupabase } from "@/lib/supabase/client";
+import { InlineStatusSelect, type StatusOption } from "@/components/InlineStatusSelect";
+import { InlineEditField } from "@/components/InlineEditField";
 import {
   getCaseById,
   getMembersForCase,
@@ -20,6 +22,8 @@ import {
   getIncomeSourcesForCase,
   getDocumentsForCase,
   saveDocument,
+  updateDocumentStatus,
+  updateDocumentNotes,
   buildSubmissionEmailDraft,
   saveCase,
   computeReadinessScore,
@@ -73,6 +77,22 @@ const DOC_CATEGORIES: { value: RecertDocumentType; label: string; group: string 
   { value: "clarification",           label: "Clarification Letter",           group: "LAHD Admin" },
   { value: "other",                   label: "Other",                          group: "Other" },
 ];
+
+// Supporting-document status dropdown (writes to recert_documents.verification_status).
+const DOC_STATUS_OPTIONS: StatusOption<RecertDocument["verificationStatus"]>[] = [
+  { value: "missing",             label: "Missing",             intent: "bad" },
+  { value: "received",            label: "Received",            intent: "info" },
+  { value: "pending_review",      label: "Pending Review",      intent: "warn" },
+  { value: "reviewed",            label: "Reviewed",            intent: "info" },
+  { value: "accepted",            label: "Accepted",            intent: "good" },
+  { value: "needs_clarification", label: "Needs Clarification", intent: "warn" },
+  { value: "rejected",            label: "Rejected",            intent: "bad" },
+];
+
+// Statuses that represent a manager review decision → logged as manager_update.
+const MANAGER_DECISION_STATUSES = new Set<RecertDocument["verificationStatus"]>([
+  "reviewed", "accepted", "needs_clarification", "rejected",
+]);
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -187,7 +207,7 @@ export default function CompilerCasePage() {
         storagePath,
         uploadedBy: actorEmail,
         uploadedAt: now,
-        verificationStatus: "pending",
+        verificationStatus: "received",
         createdAt: now,
         updatedAt: now,
       };
@@ -496,36 +516,58 @@ export default function CompilerCasePage() {
               <div key={label} className="mb-3">
                 <div className="text-[11px] font-semibold text-slate-500 uppercase tracking-wide mb-1">{label}</div>
                 <ul className="space-y-1">
-                  {docs.map(d => (
-                    <li key={d.id} className="flex items-center justify-between gap-2 rounded border border-slate-100 bg-slate-50 px-3 py-2 text-xs">
-                      <div className="min-w-0">
+                  {docs.map(d => {
+                    const actor = profile?.full_name ?? authUser?.email ?? undefined;
+                    // Tolerate any value not in the standard set (e.g. legacy "pending"
+                    // or a future connector-suggested status) so the select stays valid.
+                    const rowOptions: StatusOption<RecertDocument["verificationStatus"]>[] =
+                      DOC_STATUS_OPTIONS.some(o => o.value === d.verificationStatus)
+                        ? DOC_STATUS_OPTIONS
+                        : [{ value: d.verificationStatus, label: d.verificationStatus, intent: "neutral" }, ...DOC_STATUS_OPTIONS];
+                    return (
+                    <li key={d.id} className="flex items-start justify-between gap-2 rounded border border-slate-100 bg-slate-50 px-3 py-2 text-xs">
+                      <div className="min-w-0 flex-1">
                         <span className="font-medium text-slate-800 truncate block">{d.fileName ?? d.id}</span>
                         <span className="text-slate-500">
                           {d.uploadedBy ? `by ${d.uploadedBy}` : ""}
                           {d.uploadedAt ? ` · ${fmtDateTime(d.uploadedAt)}` : ""}
                           {d.householdMemberId ? ` · member: ${members.find(m => m.id === d.householdMemberId)?.fullName ?? d.householdMemberId}` : ""}
                         </span>
+                        <div className="mt-1">
+                          <InlineEditField
+                            value={d.notes}
+                            placeholder="+ add note (e.g. missing page 2)"
+                            multiline
+                            onSave={async (v) => {
+                              const updated = await updateDocumentNotes(d, v, actor);
+                              setDocuments(prev => prev.map(x => (x.id === d.id ? updated : x)));
+                            }}
+                          />
+                        </div>
                       </div>
                       <div className="flex items-center gap-2 shrink-0">
-                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-medium ${
-                          d.verificationStatus === "accepted" ? "bg-emerald-100 text-emerald-800" :
-                          d.verificationStatus === "rejected" ? "bg-red-100 text-red-800" :
-                          d.verificationStatus === "needs_clarification" ? "bg-amber-100 text-amber-800" :
-                          "bg-slate-100 text-slate-600"
-                        }`}>
-                          {d.verificationStatus}
-                        </span>
+                        <InlineStatusSelect
+                          value={d.verificationStatus}
+                          options={rowOptions}
+                          onSave={async (next) => {
+                            const st: "manager_update" | "manual_override" =
+                              MANAGER_DECISION_STATUSES.has(next) ? "manager_update" : "manual_override";
+                            const updated = await updateDocumentStatus(d, next, actor, st);
+                            setDocuments(prev => prev.map(x => (x.id === d.id ? updated : x)));
+                          }}
+                        />
                         {d.storagePath && (
                           <button
                             onClick={() => handleDownloadDoc(d)}
-                            className="text-blue-700 underline hover:text-blue-900"
+                            className="text-blue-700 underline hover:text-blue-900 whitespace-nowrap"
                           >
                             Download
                           </button>
                         )}
                       </div>
                     </li>
-                  ))}
+                    );
+                  })}
                 </ul>
               </div>
             ))}

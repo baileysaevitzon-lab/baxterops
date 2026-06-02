@@ -1,11 +1,15 @@
 "use client";
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { RoleSwitcher, useRole } from "./RoleProvider";
 import { useAuth } from "./AuthProvider";
 
 export default function TopBar() {
   const { user } = useRole();
   const { signedIn, profile, signOut, authUser } = useAuth();
+  const pathname = usePathname();
+  // Sprint 25: hide the workspace top bar on the public SGD Operations Portal.
+  if (pathname === "/") return null;
   return (
     <div className="border-b border-slate-200 bg-white px-8 py-3 flex flex-wrap justify-between items-center gap-3">
       <div className="text-xs text-slate-500 flex items-center gap-3">

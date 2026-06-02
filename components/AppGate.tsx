@@ -19,8 +19,10 @@ import { usePathname } from "next/navigation";
 import type { ReactNode } from "react";
 import { useAuth } from "./AuthProvider";
 
-// Paths that do NOT require auth
-const PUBLIC_PATHS = ["/login"];
+// Paths that do NOT require auth.
+// "/" is the public SGD Operations Portal landing page (Sprint 25) — exact match
+// only, so every workspace route (/baxter, /competitors, …) stays gated.
+const PUBLIC_PATHS = ["/", "/login"];
 const PUBLIC_PREFIXES = ["/recertification/tenant/"];
 
 export default function AppGate({ children }: { children: ReactNode }) {

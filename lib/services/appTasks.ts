@@ -15,7 +15,7 @@ interface Row {
   owner: string | null;
   priority: number | null;
   due_date: string | null;
-  status: "open" | "in_progress" | "done";
+  status: "open" | "in_progress" | "blocked" | "done";
   related_property: string | null;
   related_unit_id: string | null;
   related_tenant_id: string | null;
@@ -90,13 +90,50 @@ export async function upsertTask(t: Task): Promise<Task> {
   return t;
 }
 
+/**
+ * Sprint 24 — create a new task (explicit insert). Throws if Supabase is
+ * unavailable so the UI never pretends a create succeeded. Returns the saved row.
+ */
+export async function createTask(
+  input: Omit<Task, "id"> & { id?: string },
+): Promise<Task> {
+  if (BACKEND_MODE !== "supabase") throw new Error("Supabase not configured — cannot create task.");
+  const sb = getSupabase();
+  if (!sb) throw new Error("Supabase not configured — cannot create task.");
+  const t: Task = {
+    ...input,
+    id: input.id ?? `tk-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+  };
+  const now = new Date().toISOString();
+  const { data, error } = await sb
+    .from(TABLE)
+    .insert({ ...toRow(t), created_at: now, updated_at: now })
+    .select()
+    .single();
+  if (error) {
+    console.warn("[appTasks.create]", error.message);
+    throw new Error(error.message);
+  }
+  return toTask(data as Row);
+}
+
+/** Sprint 24 — thin status updater; returns the saved row (throws on failure). */
+export async function updateTaskStatus(t: Task, status: Task["status"]): Promise<Task> {
+  return upsertTask({ ...t, status });
+}
+
+/**
+ * Sprint 24 — delete now THROWS on error (previously swallowed) so the UI can
+ * keep the task visible and surface the failure instead of silently dropping it.
+ */
 export async function deleteTask(id: string): Promise<void> {
-  if (BACKEND_MODE === "supabase") {
-    const sb = getSupabase();
-    if (sb) {
-      const { error } = await sb.from(TABLE).delete().eq("id", id);
-      if (error) console.warn("[appTasks.delete]", error.message);
-    }
+  if (BACKEND_MODE !== "supabase") throw new Error("Supabase not configured — cannot delete task.");
+  const sb = getSupabase();
+  if (!sb) throw new Error("Supabase not configured — cannot delete task.");
+  const { error } = await sb.from(TABLE).delete().eq("id", id);
+  if (error) {
+    console.warn("[appTasks.delete]", error.message);
+    throw new Error(error.message);
   }
 }
 

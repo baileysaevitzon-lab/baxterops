@@ -5,9 +5,10 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { PageHeader, Badge } from "@/components/Card";
+import { PageHeader } from "@/components/Card";
+import { InlineStatusSelect, type StatusOption } from "@/components/InlineStatusSelect";
 import { useAuth } from "@/components/AuthProvider";
-import { getAllCases } from "@/lib/services/recertification";
+import { getAllCases, updateCaseStatus } from "@/lib/services/recertification";
 import type { RecertificationCase, RecertCaseStatus } from "@/lib/types";
 
 const STATUS_LABEL: Record<RecertCaseStatus, string> = {
@@ -42,8 +43,16 @@ const STATUS_INTENT: Record<RecertCaseStatus, "good" | "warn" | "bad" | "info" |
   closed_ineligible: "neutral",
 };
 
+// Canonical case-status dropdown options (writes to recertification_cases.case_status).
+const CASE_STATUS_OPTIONS: StatusOption<RecertCaseStatus>[] =
+  (Object.keys(STATUS_LABEL) as RecertCaseStatus[]).map(v => ({
+    value: v,
+    label: STATUS_LABEL[v],
+    intent: STATUS_INTENT[v],
+  }));
+
 export default function ManagerFormPage() {
-  const { signedIn, loading: authLoading } = useAuth();
+  const { signedIn, loading: authLoading, profile, authUser } = useAuth();
   const [cases, setCases] = useState<RecertificationCase[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -127,7 +136,17 @@ export default function ManagerFormPage() {
                 <tr key={c.id} className="border-t border-slate-100 hover:bg-slate-50">
                   <td className="px-4 py-3 font-medium text-slate-900">{c.primaryTenantName}</td>
                   <td className="px-4 py-3 text-slate-600">{c.unitNumber ?? "—"}</td>
-                  <td className="px-4 py-3"><Badge intent={STATUS_INTENT[c.caseStatus]}>{STATUS_LABEL[c.caseStatus]}</Badge></td>
+                  <td className="px-4 py-3">
+                    <InlineStatusSelect
+                      value={c.caseStatus}
+                      options={CASE_STATUS_OPTIONS}
+                      onSave={async (next) => {
+                        const actor = profile?.full_name ?? authUser?.email ?? undefined;
+                        const updated = await updateCaseStatus(c, next, actor, "manager_update");
+                        setCases(prev => prev.map(x => (x.id === c.id ? updated : x)));
+                      }}
+                    />
+                  </td>
                   <td className="px-4 py-3 text-xs text-slate-500">{c.dueDate ?? "—"}</td>
                   <td className="px-4 py-3 text-right">
                     <Link
