@@ -21,7 +21,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
         <link href="https://fonts.googleapis.com/css2?family=Dancing+Script:wght@400;600&display=swap" rel="stylesheet" />
-      </head>
+        <script src="https://analytics.ahrefs.com/analytics.js" data-key="UyZVUusiWYS6IL1pYhes6jA" async></script>
+        </head>
       <body>
         <AuthProvider>
         <RoleProvider>
