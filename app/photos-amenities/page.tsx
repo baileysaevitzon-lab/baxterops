@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useMemo, useState } from "react";
 import { Card, CardBody, CardHeader, PageHeader, Badge } from "@/components/Card";
+import { FieldPhotoManager } from "@/components/FieldPhotoManager";
 import { getAllPhotoEvidence } from "@/lib/services/photoEvidence";
 import { getAllAmenityObservations } from "@/lib/services/amenityObservations";
 import { BACKEND_MODE } from "@/lib/services/persistence";
@@ -50,8 +51,11 @@ export default function PhotosAmenities() {
     <>
       <PageHeader
         title="Photos + Amenities"
-        subtitle={`${photos.length} photo evidence records · ${amenities.length} amenity observations · backend: ${BACKEND_MODE}`}
+        subtitle={`${photos.filter(p => p.storagePath || p.publicUrl).length} real · ${photos.filter(p => !p.storagePath && !p.publicUrl).length} placeholder · ${amenities.length} amenity observations · backend: ${BACKEND_MODE}`}
       />
+
+      {/* Sprint 26: primary upload tool — competitor + tour + drag/drop + status */}
+      <FieldPhotoManager />
 
       <Card className="mb-6">
         <CardHeader title="Photo collections" subtitle="One row per field-tour or upload batch" />
@@ -96,15 +100,14 @@ export default function PhotosAmenities() {
           }
         />
         <CardBody>
-          <div className="bg-emerald-50 border border-emerald-200 rounded-md px-3 py-2 text-xs text-emerald-800 mb-4">
-            <strong>Zen photos are live on Supabase Storage</strong> (bucket <code>baxter-ops-photos</code>, prefix <code>competitors/zen-hollywood/field-tour-2026-05-26/</code>).
-            New field-tour batches can be uploaded by running <code>scripts/convert-zen-heic-to-jpg.sh</code> then <code>scripts/upload-zen-photos-to-supabase.sh</code>.
+          <div className="bg-sky-50 border border-sky-200 rounded-md px-3 py-2 text-xs text-sky-800 mb-4">
+            Upload new field-tour photos with the tool at the top of this page (bucket <code>baxter-ops-photos</code>). Placeholder rows (no image attached yet) are labeled below and on the upload tool.
           </div>
 
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
             {filtered.map(p => (
-              <div key={p.id} className="border border-slate-200 rounded-md overflow-hidden">
-                <div className="aspect-square bg-slate-100 flex items-center justify-center text-xs text-slate-400 text-center px-2">
+              <div key={p.id} className={`border rounded-md overflow-hidden ${!p.storagePath && !p.publicUrl ? "border-amber-300" : "border-slate-200"}`}>
+                <div className="aspect-square bg-slate-100 flex items-center justify-center text-xs text-slate-400 text-center px-2 relative">
                   {p.publicUrl ? (
                     // eslint-disable-next-line @next/next/no-img-element
                     <img src={p.publicUrl} alt={p.caption} className="w-full h-full object-cover" />
@@ -114,6 +117,9 @@ export default function PhotosAmenities() {
                       <div className="mt-1">{p.originalFilename}</div>
                       <div className="mt-1 text-[10px] italic">no image attached</div>
                     </div>
+                  )}
+                  {!p.storagePath && !p.publicUrl && (
+                    <span className="absolute top-1 left-1 bg-amber-500 text-white text-[9px] font-semibold px-1.5 py-0.5 rounded">PLACEHOLDER</span>
                   )}
                 </div>
                 <div className="p-2 text-xs">
