@@ -69,12 +69,31 @@ export async function POST(
   // the authenticated user_profiles row.
   const body = await req.json().catch(() => ({}));
   let managerName: string | undefined = body.managerName;
-  let managerTitle: string | undefined = body.managerTitle ?? "Property Manager";
+  const managerTitle: string | undefined = body.managerTitle;
   let managerEmail: string | undefined = body.managerEmail;
 
+  // Sprint 31: generation MODE. Defaults to "full" => exactly the prior behavior
+  // (merge tenant + manager + tenant signatures), so existing callers are unchanged.
+  //   full         = tenant + manager completion + both signatures (final packet)
+  //   tenant_only  = tenant completion + tenant signature only; manager fields blank
+  //   manager_only = manager completion + manager signature only; tenant fields blank
+  //   preview      = merge both but mark non-final (never advances roster to "merged")
+  type GenMode = "full" | "tenant_only" | "manager_only" | "preview";
+  const modeRaw = (body.mode as string | undefined) ?? new URL(req.url).searchParams.get("mode") ?? "full";
+  const mode: GenMode = (["full", "tenant_only", "manager_only", "preview"] as const).includes(modeRaw as GenMode)
+    ? (modeRaw as GenMode) : "full";
+  const mergeTenant = mode === "full" || mode === "tenant_only" || mode === "preview";
+  const mergeManager = mode === "full" || mode === "manager_only" || mode === "preview";
+  const isFinalPacket = mode === "full"; // only "full" is the submission-ready merged packet
+
+  // Sprint 38: the old fallback read user_profiles with no filter (maybeSingle
+  // over 6 rows always errored → name silently blank). The resolver now applies
+  // the KBI golden-standard agent defaults (Katherine Ingersoll / Director /
+  // katherine@faulknercapitalpartners.com) for Baxter when no explicit override
+  // is provided, so no profile lookup is needed here.
   if (!managerName) {
-    const { data: prof } = await sb.from("user_profiles").select("full_name, email").maybeSingle();
-    if (prof) {
+    const { data: prof } = await sb.from("user_profiles").select("full_name, email").eq("id", (await sb.auth.getUser()).data.user?.id ?? "").maybeSingle();
+    if (prof && body.useSignedInUserAsManager) {
       managerName = (prof as { full_name?: string }).full_name;
       managerEmail ||= (prof as { email?: string }).email;
     }
@@ -87,6 +106,8 @@ export async function POST(
     id: cd.id as string,
     primaryTenantName: cd.primary_tenant_name as string,
     primaryTenantPhone: cd.primary_tenant_phone as string | undefined,
+    primaryTenantEmail: cd.primary_tenant_email as string | undefined,
+    restrictedUnitSchedule: cd.restricted_unit_schedule as string | undefined,
     propertyId: cd.property_id as string,
     propertyName: cd.property_name as string,
     unitNumber: cd.unit_number as string | undefined,
@@ -127,12 +148,42 @@ export async function POST(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
   })) as any[];
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const incomeSources = (incomeRow.data ?? []) as any[];
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const assets = (assetsRow.data ?? []) as any[];
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const ua = (uaRow.data ?? undefined) as any;
+  // Sprint 38: map income/asset/UA rows snake→camel — the resolver reads
+  // camelCase (managerApproved, endingBalance, …); raw rows silently filled nothing.
+  const incomeSources = (incomeRow.data ?? []).map((s: Record<string, unknown>) => ({
+    id: s.id as string,
+    caseId: s.case_id as string,
+    householdMemberId: s.household_member_id as string | undefined,
+    incomeType: s.income_type as string,
+    employerOrSourceName: s.employer_or_source_name as string | undefined,
+    disclosedOnTicq: !!s.disclosed_on_ticq,
+    documentationReceived: !!s.documentation_received,
+    requiredProjectedIncome: s.required_projected_income as number | undefined,
+    managerApproved: !!s.manager_approved,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  })) as any[];
+  const assets = (assetsRow.data ?? []).map((a: Record<string, unknown>) => ({
+    id: a.id as string,
+    caseId: a.case_id as string,
+    householdMemberId: a.household_member_id as string | undefined,
+    accountType: a.account_type as string | undefined,
+    institutionName: a.institution_name as string | undefined,
+    accountLastFour: a.account_last_four as string | undefined,
+    endingBalance: a.ending_balance as number,
+    actualAssetIncome: a.actual_asset_income as number | undefined,
+    imputedAssetIncome: a.imputed_asset_income as number | undefined,
+    incomeUsed: a.income_used as number | undefined,
+    statementReceived: !!a.statement_received,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  })) as any[];
+  const uaRaw = uaRow.data as Record<string, unknown> | null;
+  const ua = uaRaw ? ({
+    id: uaRaw.id as string,
+    caseId: uaRaw.case_id as string,
+    totalUtilityAllowance: uaRaw.total_utility_allowance as number | undefined,
+    tenantPaysBasicElectricity: !!uaRaw.tenant_pays_basic_electricity,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  } as any) : undefined;
 
   // Build the Sprint 16 override map for the resolver.
   const overrideRows = (overridesRow.data ?? []) as Array<{
@@ -184,7 +235,11 @@ export async function POST(
         field.setText(result.value);
         applied.push({ fieldName: result.fieldName, value: result.value });
       } else if (field instanceof PDFCheckBox) {
-        // We don't currently fill checkboxes via this map; would set check() here.
+        // Sprint 38 (KBI golden standard): the resolver now emits checkbox
+        // fields (agent designation, utilities, income level, HCV, DocY).
+        // Any filled_known value on a checkbox means "checked".
+        field.check();
+        applied.push({ fieldName: result.fieldName, value: "checked" });
       } else if (field instanceof PDFRadioGroup) {
         // Radios not in current map.
       }
@@ -208,11 +263,16 @@ export async function POST(
   let completionsApplied = 0;
   let orphansSkipped = 0;
   try {
+    // Sprint 31: only merge the completion packets selected by the mode.
+    const mergePacketIds = [
+      mergeTenant ? "tenant_completion" : null,
+      mergeManager ? "manager_completion" : null,
+    ].filter(Boolean) as string[];
     const { data: completionRows } = await sb
       .from("recert_packet_field_values")
       .select("packet_id, field_key, value_text, value_json, filled_by_role")
       .eq("case_id", caseId)
-      .in("packet_id", ["tenant_completion", "manager_completion"]);
+      .in("packet_id", mergePacketIds.length ? mergePacketIds : ["__none__"]);
 
     const allRows = (completionRows ?? []) as Array<{
       packet_id: string; field_key: string; value_text: string | null;
@@ -264,11 +324,19 @@ export async function POST(
         }
         // Signature fields: handled by Sprint 17 PNG overlay; skip here.
         if (fieldType === "signature") continue;
-        // Initial: fan out single-input to 11-Initial1..7 if this is the canonical initials field
+        // Initial: fan out single-input to 11-Initial1..7 if this is the canonical initials field.
+        // Sprint 38 (KBI golden): the same tenant initials also belong in the
+        // Conflict of Interest statement boxes (17a1/17b1/17c1).
         if (fieldType === "initial" && /^11-Initial[1-9]$/.test(fieldKey)) {
           for (let i = 1; i <= 7; i++) {
             try {
               const f = form.getField(`11-Initial${i}`);
+              if (f instanceof PDFTextField) { f.setText(value); completionsApplied += 1; }
+            } catch { /* skip */ }
+          }
+          for (const coi of ["17a1", "17b1", "17c1"]) {
+            try {
+              const f = form.getField(coi);
               if (f instanceof PDFTextField) { f.setText(value); completionsApplied += 1; }
             } catch { /* skip */ }
           }
@@ -296,22 +364,34 @@ export async function POST(
   // widget's coords on the corresponding page. The /Sig widget itself stays
   // intact — DocHub still recognizes it for in-person fallback.
   let signatureOverlays = 0;
+  // Sprint 31: embed the signatures relevant to the mode. Tenant signs the
+  // household-member /Sig widgets; manager (OPM) signs the OPM /Sig widgets.
+  // Previously only tenant signatures embedded — manager signatures are now
+  // embedded for full + manager_only modes.
+  const sigRoles = [mergeTenant ? "tenant" : null, mergeManager ? "manager" : null].filter(Boolean) as string[];
   try {
     const { data: sigRows } = await sb
       .from("recert_packet_signatures")
       .select("section_key, signer_role, signature_data_url, signed_at")
       .eq("case_id", caseId)
       .eq("packet_id", "exact_form")
-      .eq("signer_role", "tenant");
+      .in("signer_role", sigRoles.length ? sigRoles : ["__none__"]);
 
-    // section_key → list of /Sig field names that section corresponds to
-    const sectionToSigFields: Record<string, string[]> = {
-      applicant_statement: ["11-HouseholdMemberSignature"],
-      conflict_of_interest: ["16-HHMbrSignature"],
+    // (signer_role, section_key) → /Sig field names. Tenant → HouseholdMember
+    // widgets; manager → OPM widgets, on pages 11 (Applicant Statement) and 16 (COI).
+    const sigFieldsFor = (role: string, section: string): string[] => {
+      if (role === "tenant") {
+        if (section === "applicant_statement") return ["11-HouseholdMemberSignature"];
+        if (section === "conflict_of_interest") return ["16-HHMbrSignature"];
+      } else if (role === "manager" || role === "owner") {
+        if (section === "applicant_statement") return ["11-OPMSignature"];
+        if (section === "conflict_of_interest") return ["16-OPMSignature"];
+      }
+      return [];
     };
 
-    for (const row of (sigRows ?? []) as Array<{ section_key: string; signature_data_url: string }>) {
-      const targetFields = sectionToSigFields[row.section_key] ?? [];
+    for (const row of (sigRows ?? []) as Array<{ section_key: string; signer_role: string; signature_data_url: string }>) {
+      const targetFields = sigFieldsFor(row.signer_role, row.section_key);
       const dataUrl = row.signature_data_url;
       if (!dataUrl?.startsWith("data:image/png;base64,")) continue;
       const pngBytes = Buffer.from(dataUrl.slice("data:image/png;base64,".length), "base64");
@@ -389,6 +469,7 @@ export async function POST(
       filled_count: filledKnown,
       blank_count: blankTenant + blankManager + blankMissing + blankPending,
       missing_data_json: {
+        mode, // Sprint 31: full | tenant_only | manager_only | preview (no schema change)
         filled: applied.length,
         blank_tenant_must_complete: blankTenant,
         blank_manager_must_complete: blankManager,
@@ -402,7 +483,9 @@ export async function POST(
         orphans_skipped: orphansSkipped,
         results: fillResults,
       },
-      status: "draft",
+      // Final merged packet => "draft" (submission-ready draft). Non-final modes
+      // are tagged so they are never mistaken for the final packet.
+      status: isFinalPacket ? "draft" : mode,
     });
     await sb.from("recert_audit_events").insert({
       id: `ae-${packetId}`,
@@ -413,20 +496,22 @@ export async function POST(
       event_payload_json: { packetId, templateId: TEMPLATE_ID, filledKnown, blankTenant, blankManager, blankPending, needsReview, completionsApplied, orphansSkipped },
     });
 
-    // Sprint 19: advance the roster lifecycle for this case to "merged" so
-    // management sees the final PDF was generated. Best-effort; ignored if
-    // no roster entry points to this case.
-    try {
-      await sb
-        .from("recert_tenant_roster")
-        .update({
-          final_pdf_generated_at: new Date().toISOString(),
-          status: "merged",
-          updated_at: new Date().toISOString(),
-        })
-        .eq("case_id", caseId);
-    } catch (e) {
-      console.warn("[exact-form] roster lifecycle update failed (non-fatal):", e);
+    // Sprint 19/31: advance the roster lifecycle to "merged" ONLY for the final
+    // full packet — tenant_only / manager_only / preview must not mark the case
+    // as merged/complete. Best-effort; ignored if no roster entry points here.
+    if (isFinalPacket) {
+      try {
+        await sb
+          .from("recert_tenant_roster")
+          .update({
+            final_pdf_generated_at: new Date().toISOString(),
+            status: "merged",
+            updated_at: new Date().toISOString(),
+          })
+          .eq("case_id", caseId);
+      } catch (e) {
+        console.warn("[exact-form] roster lifecycle update failed (non-fatal):", e);
+      }
     }
   } catch (e) {
     console.warn("[exact-form] audit write failed (non-fatal):", e);
@@ -434,14 +519,22 @@ export async function POST(
 
   // Return inline PDF — caller can download or preview in <iframe>
   // Cast to a Buffer view so Next's NextResponse accepts it as a body.
+  const modeTag: Record<GenMode, string> = {
+    full: "FULL",
+    tenant_only: "TENANT-ONLY-OFFICIAL-FORMAT",
+    manager_only: "MANAGER-ONLY-OFFICIAL-FORMAT",
+    preview: "PREVIEW",
+  };
   const responseBody = Buffer.from(filledBytes);
   return new NextResponse(responseBody, {
     status: 200,
     headers: {
       "Content-Type": "application/pdf",
-      "Content-Disposition": `inline; filename="lahd-recert-${caseId}.pdf"`,
+      "Content-Disposition": `inline; filename="lahd-recert-${caseId}-${modeTag[mode]}.pdf"`,
       "Cache-Control": "no-store",
       "X-Packet-Id": packetId,
+      "X-Mode": mode,
+      "X-Signature-Overlays": String(signatureOverlays),
       "X-Filled-Count": String(filledKnown),
       "X-Blank-Count": String(blankTenant + blankManager + blankMissing + blankPending),
       "X-Completions-Applied": String(completionsApplied),

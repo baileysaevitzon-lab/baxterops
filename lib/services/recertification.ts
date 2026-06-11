@@ -10,6 +10,7 @@ import { TABLES } from "./tables";
 import type {
   RecertificationCase,
   RecertCaseStatus,
+  RecertCertType,
   RecertHouseholdMember,
   RecertDocument,
   RecertRequiredItem,
@@ -40,6 +41,106 @@ export async function saveCase(c: RecertificationCase): Promise<RecertificationC
 
 export async function deleteCase(id: string): Promise<void> {
   return remove(TABLES.recertificationCases, id);
+}
+
+// ── Create a new case (Sprint 31: staff-facing "Add Tenant / Create Case") ─────
+
+function slugifyName(name: string): string {
+  return name.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "") || "tenant";
+}
+
+/** Canonical id convention shared with the roster flow: rc-{unit}-{slug}-2026 */
+export function generateCaseId(unit: string, name: string): string {
+  const u = unit.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "") || "unit";
+  return `rc-${u}-${slugifyName(name)}-2026`;
+}
+
+export interface CreateCaseInput {
+  primaryTenantName: string;
+  unitNumber: string;
+  certificationType?: RecertCertType; // default "annual"
+  dueDate?: string;                   // optional
+  notes?: string;                     // optional
+}
+
+export interface CreateCaseResult {
+  ok: boolean;
+  case?: RecertificationCase;
+  /** Set when a same-name + same-unit case already exists and allowDuplicate was not passed. */
+  duplicateOf?: RecertificationCase;
+  error?: string;
+}
+
+/**
+ * Create a brand-new recertification case in Supabase (no hardcoded/local state).
+ * - Requires tenant name + unit number.
+ * - Warns (does not silently create) on an apparent duplicate (same name + unit);
+ *   pass opts.allowDuplicate to proceed after the staff confirms.
+ * - Generates a stable id, ensuring uniqueness against existing ids.
+ * - Defaults: status not_started, annual cert, Baxter property, low risk.
+ * - Returns a structured result; never throws to the UI (errors are surfaced).
+ */
+export async function createCase(
+  input: CreateCaseInput,
+  opts?: { allowDuplicate?: boolean; createdBy?: string },
+): Promise<CreateCaseResult> {
+  const name = (input.primaryTenantName ?? "").trim();
+  const unit = (input.unitNumber ?? "").trim();
+  if (!name) return { ok: false, error: "Tenant name is required." };
+  if (!unit) return { ok: false, error: "Unit number is required." };
+
+  let existing: RecertificationCase[];
+  try {
+    existing = await getAllCases();
+  } catch (e) {
+    return { ok: false, error: `Could not read existing cases (not saved): ${e instanceof Error ? e.message : String(e)}` };
+  }
+
+  if (!opts?.allowDuplicate) {
+    const dup = existing.find(
+      c => c.primaryTenantName.trim().toLowerCase() === name.toLowerCase()
+        && (c.unitNumber ?? "").trim().toLowerCase() === unit.toLowerCase(),
+    );
+    if (dup) return { ok: false, duplicateOf: dup, error: "A case with this tenant name and unit already exists." };
+  }
+
+  // Ensure a unique id even if the same name/unit is intentionally re-added.
+  const base = generateCaseId(unit, name);
+  let id = base;
+  for (let n = 2; existing.some(c => c.id === id); n++) id = `${base}-${n}`;
+
+  const now = new Date().toISOString();
+  const newCase: RecertificationCase = {
+    id,
+    primaryTenantName: name,
+    unitNumber: unit,
+    propertyId: "baxter-hollywood",
+    propertyName: "Baxter Hollywood (1818 N Cherokee)",
+    certificationType: input.certificationType ?? "annual",
+    caseStatus: "not_started",
+    dueDate: input.dueDate?.trim() || undefined,
+    notes: input.notes?.trim() || undefined,
+    adultCount: 1,
+    childCount: 0,
+    subsidyStatus: "none",
+    utilityAllowanceRequired: false,
+    incomeStatus: "pending",
+    rentStatus: "pending",
+    readinessScore: 0,
+    missingItemsCount: 0,
+    riskLevel: "low",
+    createdAt: now,
+    updatedAt: now,
+    createdBy: opts?.createdBy,
+    updatedBy: opts?.createdBy,
+  };
+
+  try {
+    const saved = await saveCase(newCase);
+    return { ok: true, case: saved };
+  } catch (e) {
+    return { ok: false, error: `Save failed (not saved): ${e instanceof Error ? e.message : String(e)}` };
+  }
 }
 
 /**

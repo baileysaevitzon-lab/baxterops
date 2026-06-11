@@ -1,7 +1,8 @@
 "use client";
 import { useEffect, useMemo, useState } from "react";
 import { Card, CardBody, CardHeader, PageHeader, Badge, Stat } from "@/components/Card";
-import { BAXTER_UNITS, COMPETITORS, MARKETING_SOURCES, TENANTS, WALKTHROUGH_TOURS } from "@/lib/seed";
+import { BAXTER_UNITS, MARKETING_SOURCES, TENANTS, WALKTHROUGH_TOURS } from "@/lib/seed";
+import { useCompetitors } from "@/lib/hooks/useCompetitors";
 import { compAverageLeased, compAverageOccupancy, compAverageRent, fmtMoney, vacancyLoss } from "@/lib/calc";
 import { useRole } from "@/components/RoleProvider";
 import { getAllConflicts } from "@/lib/services/sourceConflicts";
@@ -14,6 +15,8 @@ export default function Reports() {
   const [copied, setCopied] = useState(false);
   const [ownerSafe, setOwnerSafe] = useState(true);
   const { user, can } = useRole();
+  // Phase 9: live Supabase competitors (seed fallback in-hook) for comp averages.
+  const { competitors: COMPETITORS, isLive } = useCompetitors();
   const [conflicts, setConflicts] = useState<SourceConflictRow[]>([]);
   const ledger = useSourceLedger();
   useEffect(() => { (async () => setConflicts(await getAllConflicts()))(); }, []);
@@ -130,7 +133,7 @@ RECOMMENDED NEXT ACTIONS
 5. Reactivate Craigslist.
 
 — Prepared by ${ownerSafe ? "Bailey (BaxterOps)" : `${user.name} (BaxterOps)`} for ${ownerSafe ? "ownership" : "Steve / Evan / Catherine"}`;
-  }, [today, ownerSafe, canSeeInternal, user.name]);
+  }, [today, ownerSafe, canSeeInternal, user.name, COMPETITORS]);
 
   async function copy() {
     await navigator.clipboard.writeText(report);
@@ -145,6 +148,7 @@ RECOMMENDED NEXT ACTIONS
         subtitle="Pre-filled from live data. Copy into email and send to ownership."
         action={
           <div className="flex gap-2 items-center">
+            <Badge intent={isLive ? "good" : "warn"}>{isLive ? "live comps" : "seed fallback"}</Badge>
             <div className="flex bg-slate-100 rounded-md p-1 text-xs">
               <button
                 onClick={() => setOwnerSafe(true)}

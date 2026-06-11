@@ -876,6 +876,7 @@ export interface RecertificationCase {
   missingItemsCount: number;
   lastTenantContactAt?: string;
   nextAction?: string;
+  notes?: string; // Sprint 31: optional free-text staff note (DB column added 2026-06-04)
   riskLevel: RecertRiskLevel;
   submittedAt?: string;
   approvedAt?: string;
@@ -929,6 +930,8 @@ export interface RecertDocument {
   expectedPageCount?: number;
   allPagesPresent?: boolean;
   aiClassificationStatus?: string;
+  /** Sprint 35: the required-item this upload satisfies (nullable). */
+  requiredItemId?: string;
   // Sprint 24 — widened for the staff-facing manual document-status dropdown.
   // Free-text in Supabase (no check constraint); "pending" kept for back-compat.
   verificationStatus:
@@ -954,6 +957,13 @@ export interface RecertRequiredItem {
   requirementLabel: string;
   requirementScope: RecertRequirementScope;
   status: RecertRequirementStatus;
+  /** Sprint 35: required/optional/waived/not_applicable designation. */
+  requirementLevel?: "required" | "optional" | "waived" | "not_applicable";
+  /** Tenant-facing instructions (what to bring / how to obtain). */
+  instructions?: string;
+  /** Reason captured when waiving or marking N/A. */
+  waiverReason?: string;
+  createdBy?: string;
   dueDate?: string;
   sourceReason?: string;
   createdAt: string;

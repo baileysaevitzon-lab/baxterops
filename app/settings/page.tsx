@@ -135,7 +135,7 @@ export default function Settings() {
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
         <Card>
-          <CardHeader title="Current role" subtitle="Session-scoped role switcher · MVP RBAC, not enterprise auth" />
+          <CardHeader title="Developer role preview only" subtitle="UI-only preview · does NOT change Supabase auth or RLS. Your real signed-in role is shown in the top bar." />
           <CardBody>
             <RoleSwitcher />
             <div className="mt-4 text-sm">

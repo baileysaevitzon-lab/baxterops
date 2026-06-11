@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import { Card, CardBody, CardHeader, PageHeader, Badge } from "@/components/Card";
+import { SCORING_THRESHOLDS } from "@/lib/scoringThresholds";
 import { COMPETITORS as SEED_COMPETITORS, WALKTHROUGH_TOURS } from "@/lib/seed";
 import { useCompetitors } from "@/lib/hooks/useCompetitors";
 import { compositeBand, compositeScore, deleteTour, loadTours, upsertTour } from "@/lib/storage";
@@ -298,7 +299,7 @@ export default function Walkthroughs() {
                     <div className="text-xs text-slate-500">☎ {c.phone ?? "—"}</div>
                   </td>
                   <td>{c.distanceMiles ?? "—"} mi</td>
-                  <td><Badge intent={c.compQualityScore && c.compQualityScore >= 80 ? "bad" : "warn"}>{c.compQualityScore ?? "—"}</Badge></td>
+                  <td><Badge intent={c.compQualityScore && c.compQualityScore >= SCORING_THRESHOLDS.threatBadgeScore ? "bad" : "warn"}>{c.compQualityScore ?? "—"}</Badge></td>
                   <td>{c.threatLevel ?? "—"}/5</td>
                   <td>
                     {savedScore ? (

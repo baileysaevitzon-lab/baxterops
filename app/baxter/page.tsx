@@ -2,9 +2,10 @@
 // Sprint 25 — BaxterOps Executive Dashboard. Moved from `/` to `/baxter` when
 // `/` became the public SGD Operations Portal landing page. Content unchanged;
 // remains behind AppGate (this route is NOT public).
+import Link from "next/link";
 import { Card, CardBody, CardHeader, PageHeader, Stat, Badge } from "@/components/Card";
 import { SourceBadge } from "@/components/SourceBadge";
-import { DashboardPhotoUpload } from "@/components/DashboardPhotoUpload";
+import { SCORING_THRESHOLDS } from "@/lib/scoringThresholds";
 import { BAXTER_UNITS, COMPETITORS as SEED_COMPETITORS, MARKETING_SOURCES, TENANTS, WALKTHROUGH_TOURS } from "@/lib/seed";
 import { useCompetitors } from "@/lib/hooks/useCompetitors";
 import { useTouredIds } from "@/lib/hooks/useTouredIds";
@@ -32,9 +33,17 @@ import {
   YAxis,
 } from "recharts";
 
-// Baxter aggregate stats from the call-around (2026-05-26)
-const BAXTER_OCC = 89;
-const BAXTER_LEASED = 89;
+// Baxter aggregate occupancy/leased figures.
+// SOURCE: manual call-around (2026-05-26) — these are an INTERNAL ESTIMATE, not a
+// live feed. BAXTER_UNITS only tracks a small vacancy sample (not the full 86-unit
+// roster), so building-wide occupancy CANNOT be reliably computed from it here.
+// TODO(phase-4+): wire to a real occupancy source (PMS/rent roll) and replace the
+// estimate. Until then the dashboard labels these as a manual estimate, not live.
+const BAXTER_OCC_ESTIMATE = 89;
+const BAXTER_LEASED_ESTIMATE = 89;
+const BAXTER_STATS_SOURCE = "Manual estimate · 2026-05-26 call-around";
+// Phase 4 (Task 5): cosmetic thresholds now centralized in lib/scoringThresholds.
+const HIGH_QUALITY_COMP_SCORE = SCORING_THRESHOLDS.highQualityComp;
 
 export default function BaxterDashboard() {
   const { can } = useRole();
@@ -83,7 +92,7 @@ export default function BaxterDashboard() {
   ];
 
   const occupancyChart = [
-    { property: "The Baxter", occupancy: BAXTER_OCC, leased: BAXTER_LEASED },
+    { property: "The Baxter", occupancy: BAXTER_OCC_ESTIMATE, leased: BAXTER_LEASED_ESTIMATE },
     ...COMPETITORS.slice(0, 10).map(c => ({
       property: c.name.replace(" Hollywood", ""),
       occupancy: c.occupancyPct ?? 0,
@@ -110,27 +119,37 @@ export default function BaxterDashboard() {
         }
       />
 
-      {/* Sprint 7 — photo upload widget */}
+      {/* Sprint 27 — single source of truth for photo upload is /photos-amenities */}
       <div className="mb-6">
-        <DashboardPhotoUpload />
+        <Card>
+          <CardBody className="flex items-center justify-between gap-4 flex-wrap">
+            <div>
+              <div className="font-semibold text-slate-900">📷 Field-tour photos</div>
+              <div className="text-sm text-slate-500">Upload and manage competitor field-tour photos in Photos + Amenities.</div>
+            </div>
+            <Link href="/photos-amenities" className="px-4 py-2 rounded-lg bg-slate-900 text-white text-sm font-semibold hover:bg-slate-700 whitespace-nowrap">
+              Open Photos + Amenities →
+            </Link>
+          </CardBody>
+        </Card>
       </div>
 
       {/* Top stat row */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
         <Stat
-          label="Baxter Occupancy"
-          value={`${BAXTER_OCC}%`}
-          delta={`${(BAXTER_OCC - compOcc).toFixed(1)} pp vs comp`}
-          intent={BAXTER_OCC >= compOcc ? "good" : "bad"}
-          sub={`Comp avg ${compOcc.toFixed(1)}%`}
+          label="Baxter Occupancy (est.)"
+          value={`${BAXTER_OCC_ESTIMATE}%`}
+          delta={`${(BAXTER_OCC_ESTIMATE - compOcc).toFixed(1)} pp vs comp`}
+          intent={BAXTER_OCC_ESTIMATE >= compOcc ? "good" : "bad"}
+          sub={`Comp avg ${compOcc.toFixed(1)}% · ${BAXTER_STATS_SOURCE}`}
           source={<SourceBadge fieldKey="occupancy_pct" entityType="global_metric" entityId="baxter" compact />}
         />
         <Stat
-          label="Baxter Leased"
-          value={`${BAXTER_LEASED}%`}
-          delta={`${(BAXTER_LEASED - compLeased).toFixed(1)} pp vs comp`}
+          label="Baxter Leased (est.)"
+          value={`${BAXTER_LEASED_ESTIMATE}%`}
+          delta={`${(BAXTER_LEASED_ESTIMATE - compLeased).toFixed(1)} pp vs comp`}
           intent="bad"
-          sub={`Comp avg ${compLeased.toFixed(1)}%`}
+          sub={`Comp avg ${compLeased.toFixed(1)}% · ${BAXTER_STATS_SOURCE}`}
           source={<SourceBadge fieldKey="leased_pct" entityType="global_metric" entityId="baxter" compact />}
         />
         <Stat
@@ -150,7 +169,7 @@ export default function BaxterDashboard() {
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-        <Stat label="Active Comps" value={`${COMPETITORS.length}`} sub={`${COMPETITORS.filter(c => (c.compQualityScore ?? 0) >= 75).length} high-quality`} />
+        <Stat label="Active Comps" value={`${COMPETITORS.length}`} sub={`${COMPETITORS.filter(c => (c.compQualityScore ?? 0) >= HIGH_QUALITY_COMP_SCORE).length} high-quality (score ≥ ${HIGH_QUALITY_COMP_SCORE})`} />
         <Stat label="Pending Walkthroughs" value={`${pendingTours}`} sub={`${completedTours} completed`} />
         <Stat label="Recert Outreach" value={`${outreachPending}`} intent="warn" sub={`${escalations} escalations`} />
         <Stat
@@ -217,7 +236,7 @@ export default function BaxterDashboard() {
                 {topThreats.map(c => (
                   <tr key={c.id}>
                     <td className="font-medium">{c.name}</td>
-                    <td><Badge intent={c.compQualityScore && c.compQualityScore >= 80 ? "bad" : "warn"}>{c.compQualityScore}</Badge></td>
+                    <td><Badge intent={c.compQualityScore && c.compQualityScore >= SCORING_THRESHOLDS.threatBadgeScore ? "bad" : "warn"}>{c.compQualityScore}</Badge></td>
                     <td className="text-slate-600">{c.specials ?? "—"}</td>
                   </tr>
                 ))}

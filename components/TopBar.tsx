@@ -1,11 +1,11 @@
 "use client";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { RoleSwitcher, useRole } from "./RoleProvider";
 import { useAuth } from "./AuthProvider";
 
 export default function TopBar() {
-  const { user } = useRole();
+  // Sprint 27: TopBar shows the real signed-in identity only. The mock role
+  // switcher (developer preview) now lives in Settings, clearly labeled.
   const { signedIn, profile, signOut, authUser } = useAuth();
   const pathname = usePathname();
   // Sprint 25: hide the workspace top bar on the public SGD Operations Portal.
@@ -21,13 +21,8 @@ export default function TopBar() {
         ) : (
           <Link href="/login" className="text-sky-700 underline">Sign in →</Link>
         )}
-        <span className="text-slate-300">|</span>
-        <span title="Mock role switcher; UI-only preview. Does NOT change Supabase RLS.">
-          UI preview as <span className="font-medium text-slate-700">{user.name}</span> ({user.role})
-        </span>
       </div>
       <div className="flex items-center gap-3">
-        <RoleSwitcher compact />
         {signedIn && (
           <button onClick={() => signOut()} className="text-xs px-2 py-1 rounded border border-rose-200 text-rose-700 hover:bg-rose-50">
             Sign out

@@ -166,6 +166,17 @@ export default function CombinePage() {
 
   return (
     <div className="max-w-4xl mx-auto space-y-6">
+      {/* Sprint 32: this view is superseded by the canonical Income Certification Package Compiler. */}
+      <div className="rounded-md border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900 flex items-center justify-between gap-3 flex-wrap">
+        <span>
+          ⚠ This “Combine” view is superseded. The canonical workflow is the{" "}
+          <strong>Income Certification Package Compiler</strong> (mode selector, manager signature, missing-items checklist).
+        </span>
+        <Link href={`/recertification/compiler/${caseId}`} className="shrink-0 px-3 py-1.5 rounded bg-slate-900 text-white text-xs hover:bg-slate-700 whitespace-nowrap">
+          Open in Compiler →
+        </Link>
+      </div>
+
       {/* Header */}
       <div>
         <div className="flex items-center gap-2 text-sm text-slate-500 mb-1">

@@ -137,7 +137,7 @@ export default function CompetitorIntelligence() {
         return (
           c.competitorStrategicType === "premium_amenity_comp" ||
           c.id === "c-vine-1600" || // 5,200 2BR — not a rent anchor
-          c.id === "c-arrive-hollywood" // luxury 1BR at $4,000 — not a rent anchor
+          c.id === "c-arrive-hollywood" // Not Comparable — Instructive; 1BR $3,200 (resolved from prior $4,000 est.), excluded as rent anchor
         );
       }).map(c => c.id),
     );
@@ -627,7 +627,7 @@ export default function CompetitorIntelligence() {
 
       {/* Amenity coverage */}
       <Card className="mb-6">
-        <CardHeader title="Amenity coverage across competitors" subtitle="Share of all 17 comps offering each amenity. Drives the 'Baxter is missing X' conversation." />
+        <CardHeader title="Amenity coverage across competitors" subtitle={`Share of all ${COMPETITORS.length} comps offering each amenity. Drives the 'Baxter is missing X' conversation.`} />
         <CardBody>
           <div style={{ width: "100%", height: 280 }}>
             <ResponsiveContainer>

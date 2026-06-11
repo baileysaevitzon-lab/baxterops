@@ -2,6 +2,7 @@
 import { useEffect, useState } from "react";
 import { Card, CardBody, CardHeader, PageHeader, Badge, Stat } from "@/components/Card";
 import { getAllQueueItems, upsertQueueItem } from "@/lib/services/verificationQueue";
+import { ConnectorStagingPanel } from "@/components/ConnectorStagingPanel";
 import { useRole } from "@/components/RoleProvider";
 import { bulkUpsertLedger } from "@/lib/services/sourceLedger";
 import { useSourceLedger } from "@/components/SourceLedgerProvider";
@@ -88,6 +89,11 @@ export default function VerificationQueuePage() {
         <Stat label="Pending" value={`${pending}`} intent={pending > 0 ? "warn" : "good"} />
         <Stat label="Confirmed" value={`${confirmed}`} intent="good" />
         <Stat label="Total" value={`${rows.length}`} />
+      </div>
+
+      {/* Sprint 29 (Phase 6): connector (Apify/official-site) staging — promote disabled, reject = queue-only */}
+      <div className="mb-6">
+        <ConnectorStagingPanel />
       </div>
 
       {msg && <div className="mb-4 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-800">{msg}</div>}

@@ -2,6 +2,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { Card, CardBody, CardHeader, PageHeader, Badge } from "@/components/Card";
 import { FieldPhotoManager } from "@/components/FieldPhotoManager";
+import { PhotoLightbox } from "@/components/PhotoLightbox";
+import { PhotoReconciliationReport } from "@/components/PhotoReconciliationReport";
+import { thumbUrl } from "@/lib/storageImage";
 import { getAllPhotoEvidence } from "@/lib/services/photoEvidence";
 import { getAllAmenityObservations } from "@/lib/services/amenityObservations";
 import { BACKEND_MODE } from "@/lib/services/persistence";
@@ -19,6 +22,7 @@ export default function PhotosAmenities() {
   const [filterCollection, setFilterCollection] = useState<string>("all");
   const [filterCategory, setFilterCategory] = useState<string>("all");
   const [filterCompetitor, setFilterCompetitor] = useState<string>("all");
+  const [lightbox, setLightbox] = useState<number | null>(null);
 
   useEffect(() => {
     (async () => {
@@ -105,12 +109,23 @@ export default function PhotosAmenities() {
           </div>
 
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
-            {filtered.map(p => (
+            {filtered.map((p, idx) => (
               <div key={p.id} className={`border rounded-md overflow-hidden ${!p.storagePath && !p.publicUrl ? "border-amber-300" : "border-slate-200"}`}>
-                <div className="aspect-square bg-slate-100 flex items-center justify-center text-xs text-slate-400 text-center px-2 relative">
+                <div
+                  className={`aspect-square bg-slate-100 flex items-center justify-center text-xs text-slate-400 text-center px-2 relative ${p.publicUrl ? "cursor-zoom-in" : ""}`}
+                  onClick={p.publicUrl ? () => setLightbox(idx) : undefined}
+                  role={p.publicUrl ? "button" : undefined}
+                  title={p.publicUrl ? "Click to view full size" : undefined}
+                >
                   {p.publicUrl ? (
                     // eslint-disable-next-line @next/next/no-img-element
-                    <img src={p.publicUrl} alt={p.caption} className="w-full h-full object-cover" />
+                    <img
+                      src={thumbUrl(p.publicUrl, 400)}
+                      alt={p.caption}
+                      loading="lazy"
+                      className="w-full h-full object-cover"
+                      onError={e => { const t = e.currentTarget; if (p.publicUrl && t.src !== p.publicUrl) t.src = p.publicUrl; }}
+                    />
                   ) : (
                     <div>
                       <div className="text-slate-500 font-medium">#{p.photoOrder}</div>
@@ -168,6 +183,12 @@ export default function PhotosAmenities() {
           </table>
         </CardBody>
       </Card>
+
+      <div className="mt-6">
+        <PhotoReconciliationReport />
+      </div>
+
+      <PhotoLightbox photos={filtered} index={lightbox} onClose={() => setLightbox(null)} onIndex={setLightbox} />
     </>
   );
 }

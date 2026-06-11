@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import { Card, CardBody, CardHeader, PageHeader, Badge } from "@/components/Card";
+import { SCORING_THRESHOLDS } from "@/lib/scoringThresholds";
 import { BAXTER_UNITS, DEFAULT_MATCHING_WEIGHTS } from "@/lib/seed";
 import { useCompetitors } from "@/lib/hooks/useCompetitors";
 import { closestComps, fmtMoney } from "@/lib/calc";
@@ -243,7 +244,7 @@ export default function CompMatching() {
                       <div className="text-xs text-slate-500">{c.address}</div>
                     </td>
                     <td>
-                      <Badge intent={m.similarity >= 70 ? "good" : m.similarity >= 50 ? "warn" : "neutral"}>
+                      <Badge intent={m.similarity >= SCORING_THRESHOLDS.similarityStrong ? "good" : m.similarity >= SCORING_THRESHOLDS.similarityMedium ? "warn" : "neutral"}>
                         {m.similarity}
                       </Badge>
                     </td>

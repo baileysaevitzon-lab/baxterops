@@ -11,18 +11,18 @@ const sections = [
       { href: "/competitors", label: "Competitor Database" },
       { href: "/competitor-intelligence", label: "Competitor Intelligence" },
       { href: "/comp-matching", label: "Comp Matching" },
+      { href: "/two-bedroom-analysis", label: "2BR Competitive Analysis" },
       { href: "/pricing-model", label: "Pricing Model" },
       { href: "/photos-amenities", label: "Photos + Amenities" },
     ],
   },
   {
+    // Sprint 27: Local Partnerships / Marketing ROI / Lead Funnel hidden from nav
+    // (localStorage-only / static-seed; pages still exist, just not surfaced).
     label: "Field + Marketing",
     items: [
       { href: "/walkthrough-campaigns", label: "Walkthrough Campaigns" },
       { href: "/add-tour", label: "Add Tour (new property)" },
-      { href: "/local-partnerships", label: "Local Partnerships" },
-      { href: "/marketing-roi", label: "Marketing ROI" },
-      { href: "/lead-funnel", label: "Lead Funnel" },
     ],
   },
   {

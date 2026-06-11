@@ -8,7 +8,9 @@
 // All calculation outputs are labeled "Manager review required."
 
 import { useState, useEffect, useCallback } from "react";
+import type { Dispatch, SetStateAction } from "react";
 import { useParams } from "next/navigation";
+import { RecertDocumentsManager } from "@/components/RecertDocumentsManager";
 import Link from "next/link";
 import { useAuth } from "@/components/AuthProvider";
 import { getSupabase } from "@/lib/supabase/client";
@@ -506,7 +508,7 @@ export default function RecertCaseDetailPage() {
         {activeTab === "combine"     && <CombineTab {...{ caseId, recertCase, score, requiredItems, incomeSources, members, aiReview, draftEmail, saving, copySuccess, handleCopyEmail, handleMarkSubmitted }} />}
         {activeTab === "overview"    && <OverviewTab {...{ recertCase, score, members, requiredItems, incomeSources, aiReview, missingCount, saving, handleStatusChange, setActiveTab: navigateTo }} />}
         {activeTab === "household"   && <HouseholdTab {...{ members, saving, setSaving, caseId, setMembers, loadAll }} />}
-        {activeTab === "documents"   && <DocumentsTab {...{ documents, requiredItems, saving, setSaving, caseId, setDocuments, toggleRequiredItem }} />}
+        {activeTab === "documents"   && <DocumentsTab {...{ documents, requiredItems, caseId, members, setDocuments, setRequiredItems }} />}
         {activeTab === "review"      && <ReviewTab {...{ aiReview, reviewRunning, handleRunReview, setActiveTab: navigateTo }} />}
         {activeTab === "income"      && <IncomeTab {...{ incomeSources, saving, handleApproveIncome }} />}
         {activeTab === "assets"      && <AssetsTab {...{ assetAccounts, depositReviews, saving, setSaving, setDepositReviews }} />}
@@ -1114,117 +1116,24 @@ function HouseholdTab({
 // ════════════════════════════════════════════════════════════════════════════
 
 function DocumentsTab({
-  documents, requiredItems, saving, setSaving, caseId, setDocuments, toggleRequiredItem,
+  documents, requiredItems, caseId, members, setDocuments, setRequiredItems,
 }: {
   documents: RecertDocument[];
   requiredItems: RecertRequiredItem[];
-  saving: boolean;
-  setSaving: (v: boolean) => void;
   caseId: string;
-  setDocuments: (d: RecertDocument[]) => void;
-  toggleRequiredItem: (item: RecertRequiredItem, status: RecertRequiredItem["status"]) => Promise<void>;
+  members: RecertHouseholdMember[];
+  setDocuments: Dispatch<SetStateAction<RecertDocument[]>>;
+  setRequiredItems: Dispatch<SetStateAction<RecertRequiredItem[]>>;
 }) {
-  const missing = requiredItems.filter(r => r.status === "missing" || r.status === "needs_clarification");
-  const complete = requiredItems.filter(r => r.status === "complete");
-  const notStarted = requiredItems.filter(r => r.status === "not_started" || r.status === "requested" || r.status === "uploaded" || r.status === "reviewed");
-
-  const STATUS_ITEM_COLOR: Record<string, string> = {
-    complete: "text-green-700 bg-green-50 border-green-200",
-    missing: "text-red-600 bg-red-50 border-red-200",
-    needs_clarification: "text-orange-600 bg-orange-50 border-orange-200",
-    not_started: "text-gray-500 bg-gray-50 border-gray-200",
-    requested: "text-blue-600 bg-blue-50 border-blue-200",
-    uploaded: "text-indigo-600 bg-indigo-50 border-indigo-200",
-    reviewed: "text-purple-600 bg-purple-50 border-purple-200",
-    not_applicable: "text-gray-400 bg-gray-50 border-gray-200",
-  };
-
-  const ALL_ITEM_STATUSES: RecertRequiredItem["status"][] = [
-    "not_started", "requested", "uploaded", "reviewed", "complete", "missing", "needs_clarification", "not_applicable",
-  ];
-
   return (
-    <div className="space-y-6">
-      {/* Required items checklist */}
-      <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
-        <div className="px-4 py-3 border-b border-gray-100 bg-gray-50 flex items-center justify-between">
-          <h3 className="text-sm font-semibold text-gray-700">Required Items Checklist</h3>
-          <div className="flex items-center gap-2 text-xs text-gray-500">
-            <span className="text-green-600 font-semibold">{complete.length} complete</span>
-            {missing.length > 0 && <span className="text-red-600 font-semibold">{missing.length} missing/unclear</span>}
-            <span>{notStarted.length} in progress</span>
-          </div>
-        </div>
-        <div className="divide-y divide-gray-50">
-          {requiredItems.map(item => (
-            <div key={item.id} className="px-4 py-3 flex items-start justify-between gap-3">
-              <div>
-                <div className="text-sm font-medium text-gray-900">{item.requirementLabel}</div>
-                <div className="text-xs text-gray-500 mt-0.5 capitalize">{item.requirementScope.replace("_", " ")} {item.sourceReason ? "— " + item.sourceReason : ""}</div>
-              </div>
-              <div className="flex items-center gap-2 flex-shrink-0">
-                <select
-                  value={item.status}
-                  onChange={e => toggleRequiredItem(item, e.target.value as RecertRequiredItem["status"])}
-                  disabled={saving}
-                  className={`text-xs px-2 py-1 rounded-md border font-medium cursor-pointer ${STATUS_ITEM_COLOR[item.status] ?? "text-gray-600 bg-white border-gray-200"} ${saving ? "opacity-50" : ""}`}
-                >
-                  {ALL_ITEM_STATUSES.map(s => (
-                    <option key={s} value={s}>{s.replace(/_/g, " ")}</option>
-                  ))}
-                </select>
-              </div>
-            </div>
-          ))}
-          {requiredItems.length === 0 && (
-            <div className="px-4 py-6 text-center text-gray-400 text-sm">No required items defined for this case.</div>
-          )}
-        </div>
-      </div>
-
-      {/* Uploaded documents */}
-      <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
-        <div className="px-4 py-3 border-b border-gray-100 bg-gray-50">
-          <h3 className="text-sm font-semibold text-gray-700">Uploaded Documents ({documents.length})</h3>
-        </div>
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-gray-100 text-xs text-gray-500">
-                <th className="text-left px-4 py-2">Document Type</th>
-                <th className="text-left px-4 py-2">Filename</th>
-                <th className="text-left px-4 py-2">Uploaded</th>
-                <th className="text-left px-4 py-2">Status</th>
-                <th className="text-left px-4 py-2">Notes</th>
-              </tr>
-            </thead>
-            <tbody>
-              {documents.map(doc => (
-                <tr key={doc.id} className="border-b border-gray-50 last:border-0">
-                  <td className="px-4 py-3 font-medium text-gray-800">{DOC_TYPE_LABEL[doc.documentType] ?? doc.documentType}</td>
-                  <td className="px-4 py-3 text-gray-600 text-xs font-mono">{doc.fileName ?? "—"}</td>
-                  <td className="px-4 py-3 text-gray-500 text-xs">{fmtDate(doc.uploadedAt)}</td>
-                  <td className="px-4 py-3">
-                    <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${
-                      doc.verificationStatus === "accepted" ? "bg-green-50 text-green-700 border-green-200" :
-                      doc.verificationStatus === "needs_clarification" ? "bg-orange-50 text-orange-600 border-orange-200" :
-                      doc.verificationStatus === "rejected" ? "bg-red-50 text-red-600 border-red-200" :
-                      "bg-gray-50 text-gray-500 border-gray-200"
-                    }`}>
-                      {doc.verificationStatus.replace("_", " ")}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3 text-gray-500 text-xs">{doc.notes ?? "—"}</td>
-                </tr>
-              ))}
-              {documents.length === 0 && (
-                <tr><td colSpan={5} className="px-4 py-6 text-center text-gray-400 text-sm">No documents uploaded yet.</td></tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
-    </div>
+    <RecertDocumentsManager
+      caseId={caseId}
+      documents={documents}
+      requiredItems={requiredItems}
+      members={members}
+      setDocuments={setDocuments}
+      setRequiredItems={setRequiredItems}
+    />
   );
 }
 

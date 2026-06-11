@@ -1,7 +1,8 @@
 "use client";
 import { useEffect, useState } from "react";
 import { Card, CardBody, CardHeader, PageHeader, Badge } from "@/components/Card";
-import { BAXTER_UNITS, COMPETITORS, DEFAULT_MATCHING_WEIGHTS } from "@/lib/seed";
+import { BAXTER_UNITS, DEFAULT_MATCHING_WEIGHTS } from "@/lib/seed";
+import { useCompetitors } from "@/lib/hooks/useCompetitors";
 import { estimateRent, fmtMoney } from "@/lib/calc";
 import { getAllObservedUnits } from "@/lib/services/competitorUnits";
 import { getAllConflicts } from "@/lib/services/sourceConflicts";
@@ -9,6 +10,9 @@ import { SourceBadge } from "@/components/SourceBadge";
 import type { CompetitorUnitObservation, SourceConflictRow } from "@/lib/types";
 
 export default function PricingModel() {
+  // Phase 9: live Supabase competitors (seed fallback built into the hook) so
+  // corrected sqft/data flow here too. Pricing formulas unchanged.
+  const { competitors: COMPETITORS, isLive } = useCompetitors();
   const estimates = BAXTER_UNITS.map(u => ({ unit: u, est: estimateRent(u, COMPETITORS, DEFAULT_MATCHING_WEIGHTS) }));
   const [observed, setObserved] = useState<CompetitorUnitObservation[]>([]);
   const [conflicts, setConflicts] = useState<SourceConflictRow[]>([]);
@@ -33,6 +37,11 @@ export default function PricingModel() {
       <PageHeader
         title="Pricing Model"
         subtitle="Explainable pseudo-regression: matched-comp baseline + covariate adjustments (window, closet, light, floor). This is an operating estimate, not an appraisal."
+        action={
+          <Badge intent={isLive ? "good" : "warn"}>
+            {isLive ? "live comps (Supabase)" : "seed fallback"}
+          </Badge>
+        }
       />
 
       {openRentConflicts.length > 0 && (

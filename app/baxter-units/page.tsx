@@ -1,13 +1,17 @@
 "use client";
 import { useState } from "react";
 import { Card, CardBody, CardHeader, PageHeader, Badge } from "@/components/Card";
-import { BAXTER_UNITS, COMPETITORS, DEFAULT_MATCHING_WEIGHTS } from "@/lib/seed";
+import { SCORING_THRESHOLDS } from "@/lib/scoringThresholds";
+import { BAXTER_UNITS, DEFAULT_MATCHING_WEIGHTS } from "@/lib/seed";
+import { useCompetitors } from "@/lib/hooks/useCompetitors";
 import { closestComps, estimateRent, fmtMoney, netEffectiveRent, rentPerSqft } from "@/lib/calc";
 import { DATA_QUALITY_FLAGS } from "@/lib/dataQuality";
 import { SourceBadge } from "@/components/SourceBadge";
-import type { BaxterUnit } from "@/lib/types";
+import type { BaxterUnit, CompetitorProperty } from "@/lib/types";
 
-function UnitDrawer({ unit, onClose }: { unit: BaxterUnit; onClose: () => void }) {
+function UnitDrawer({ unit, onClose, comps }: { unit: BaxterUnit; onClose: () => void; comps: CompetitorProperty[] }) {
+  // Phase 9: matched comps use live Supabase competitors (corrected sqft flows here).
+  const COMPETITORS = comps;
   const top = closestComps(unit, COMPETITORS, DEFAULT_MATCHING_WEIGHTS, 5);
   const est = estimateRent(unit, COMPETITORS, DEFAULT_MATCHING_WEIGHTS);
   const leaseMonths = unit.leaseMonths ?? unit.leaseTermMonths ?? 12;
@@ -133,7 +137,7 @@ function UnitDrawer({ unit, onClose }: { unit: BaxterUnit; onClose: () => void }
                   return (
                     <tr key={m.competitorId}>
                       <td className="font-medium">{c?.name}</td>
-                      <td><Badge intent={m.similarity >= 70 ? "good" : "warn"}>{m.similarity}</Badge></td>
+                      <td><Badge intent={m.similarity >= SCORING_THRESHOLDS.similarityStrong ? "good" : "warn"}>{m.similarity}</Badge></td>
                       <td>{fmtMoney(ct?.avgRent)}</td>
                       <td className={m.rentGap < 0 ? "text-emerald-600" : "text-rose-600"}>
                         {m.rentGap > 0 ? "+" : ""}{fmtMoney(m.rentGap)}
@@ -159,11 +163,13 @@ function UnitDrawer({ unit, onClose }: { unit: BaxterUnit; onClose: () => void }
 
 export default function BaxterUnits() {
   const [selected, setSelected] = useState<BaxterUnit | null>(null);
+  const { competitors: comps, isLive } = useCompetitors();
   return (
     <>
       <PageHeader
         title="Baxter Units"
         subtitle="Per-unit covariates and pricing recommendations. Click any row for full detail and matched comps."
+        action={<Badge intent={isLive ? "good" : "warn"}>{isLive ? "live comps (Supabase)" : "seed fallback"}</Badge>}
       />
       <Card>
         <CardHeader title={`${BAXTER_UNITS.length} units tracked`} subtitle={`${BAXTER_UNITS.filter(u => u.occupancy === "vacant").length} vacant`} />
@@ -214,7 +220,7 @@ export default function BaxterUnits() {
           </table>
         </CardBody>
       </Card>
-      {selected && <UnitDrawer unit={selected} onClose={() => setSelected(null)} />}
+      {selected && <UnitDrawer unit={selected} onClose={() => setSelected(null)} comps={comps} />}
     </>
   );
 }

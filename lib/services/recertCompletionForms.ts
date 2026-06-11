@@ -282,15 +282,26 @@ export async function buildTenantFormSchema(caseId: string): Promise<CompletionF
     /** Number of additional optional source slots (e.g. self-employment has 3). */
     additionalSlots: number;
   }
+  // Sprint 38 (KBI golden standard): question keys realigned to the OFFICIAL
+  // LAHD TIC-Q numbering. The old map assigned the 8 simplified questions
+  // sequentially to Q1–Q8, which put answers on the wrong federal-form lines
+  // (e.g. Social Security landed on Q4 = unemployment). Official order:
+  //   Q1 self-employment · Q2 job/wages · Q3 cash gifts · Q4 unemployment ·
+  //   Q5 VA/military · Q6 Social Security · Q7 minors' unearned income ·
+  //   Q8 SSI · Q9 disability/EDD · Q11 child support · Q13 pensions/trusts
+  // "Business income" has no single TIC-Q line (LAHD folds it into Q1) — it is
+  // captured under a non-PDF key for manager review rather than mis-attested.
+  // Questions the simplified form does NOT ask (Q3, Q5, Q7, Q8, Q10, Q12,
+  // Q14–Q17) stay blank for the manager/agent to verify with the tenant.
   const incomeQs: IncomeQ[] = [
-    { key: "12-1", label: "Do you have employment income (wages, salary, hourly)?",       payerLabel: "Employer name",                hasMonthly: true, additionalSlots: 0 },
-    { key: "12-2", label: "Self-employment, freelance, or 1099 income?",                  payerLabel: "Nature of self-employment",    hasMonthly: true, additionalSlots: 2 },
-    { key: "12-3", label: "Business income or partnership distributions?",                payerLabel: null,                           hasMonthly: true, additionalSlots: 0 },
-    { key: "12-4", label: "Social Security or SSI benefits?",                             payerLabel: null,                           hasMonthly: true, additionalSlots: 0 },
-    { key: "12-5", label: "Unemployment / EDD payments?",                                 payerLabel: null,                           hasMonthly: true, additionalSlots: 0 },
-    { key: "12-6", label: "Child support or alimony received?",                           payerLabel: null,                           hasMonthly: true, additionalSlots: 0 },
-    { key: "12-7", label: "Pension or retirement income?",                                payerLabel: null,                           hasMonthly: true, additionalSlots: 0 },
-    { key: "12-8", label: "Disability or workers' comp benefits?",                        payerLabel: null,                           hasMonthly: true, additionalSlots: 0 },
+    { key: "12-2",  label: "Do you have employment income (wages, salary, hourly)?",       payerLabel: "Employer name",                hasMonthly: true, additionalSlots: 2 },
+    { key: "12-1",  label: "Self-employment, freelance, or 1099 income?",                  payerLabel: "Nature of self-employment",    hasMonthly: true, additionalSlots: 0 },
+    { key: "x-biz", label: "Business income or partnership distributions?",                payerLabel: null,                           hasMonthly: true, additionalSlots: 0 },
+    { key: "12-6",  label: "Social Security or SSI benefits?",                             payerLabel: null,                           hasMonthly: true, additionalSlots: 0 },
+    { key: "12-4",  label: "Unemployment / EDD payments?",                                 payerLabel: null,                           hasMonthly: true, additionalSlots: 0 },
+    { key: "13-11", label: "Child support or alimony received?",                           payerLabel: null,                           hasMonthly: true, additionalSlots: 0 },
+    { key: "13-13", label: "Pension or retirement income?",                                payerLabel: "Source of pension / retirement", hasMonthly: true, additionalSlots: 1 },
+    { key: "12-9",  label: "Disability or workers' comp benefits?",                        payerLabel: null,                           hasMonthly: true, additionalSlots: 0 },
   ];
   const incomeFields: CompletionFormField[] = [];
   for (const q of incomeQs) {
@@ -405,13 +416,21 @@ export async function buildTenantFormSchema(caseId: string): Promise<CompletionF
     /** Field name pattern: when true, slot suffix is "1" (e.g. Info1); otherwise "" (e.g. Value only). */
     multipleSlots: boolean;
   }
+  // Sprint 38 (KBI golden standard): asset keys realigned to the OFFICIAL
+  // TIC-Q numbering — Q18 checking · Q19 savings · Q20 EBT/debit · Q21 payment
+  // apps · Q22 revocable trusts · Q23 real estate · Q25 stocks/bonds ·
+  // Q30 cash on hand. The old map put cash→Q20(EBT), investments→Q21(Venmo),
+  // real estate→Q25(stocks), trusts→Q26(CDs). Unasked questions (Q20, Q21,
+  // Q24, Q26–Q29) stay blank for manager verification. "Trust funds / life
+  // insurance" is conflated on the simplified form — it maps to Q22 (trusts);
+  // a Yes there should prompt the manager to also review Q28 (life insurance).
   const assetQs: AssetQ[] = [
     { key: "14-18", pageNum: 14, label: "Do you have any checking accounts?",                                    institutionLabel: "Financial institution",   valueLabel: "Current balance (USD)",   hasInterest: true,  multipleSlots: true  },
     { key: "14-19", pageNum: 14, label: "Do you have any savings accounts?",                                     institutionLabel: "Financial institution",   valueLabel: "Current balance (USD)",   hasInterest: true,  multipleSlots: true  },
-    { key: "14-20", pageNum: 14, label: "Cash on hand or money kept at home?",                                   institutionLabel: null,                      valueLabel: "Amount (USD)",            hasInterest: false, multipleSlots: false },
-    { key: "14-21", pageNum: 14, label: "Investment accounts (stocks, bonds, CDs, mutual funds)?",               institutionLabel: "Brokerage / institution", valueLabel: "Current value (USD)",     hasInterest: false, multipleSlots: true  },
-    { key: "15-25", pageNum: 15, label: "Real estate you own (other than this unit)?",                            institutionLabel: "Property description",    valueLabel: "Current market value (USD)", hasInterest: true, multipleSlots: true  },
-    { key: "15-26", pageNum: 15, label: "Trust funds, life insurance with cash value, or other assets?",         institutionLabel: "Description of asset",    valueLabel: "Cash value (USD)",        hasInterest: true,  multipleSlots: true  },
+    { key: "15-30", pageNum: 15, label: "Cash on hand or money kept at home?",                                   institutionLabel: null,                      valueLabel: "Amount (USD)",            hasInterest: false, multipleSlots: false },
+    { key: "15-25", pageNum: 15, label: "Investment accounts (stocks, bonds, CDs, mutual funds)?",               institutionLabel: "Brokerage / institution", valueLabel: "Current value (USD)",     hasInterest: false, multipleSlots: true  },
+    { key: "14-23", pageNum: 14, label: "Real estate you own (other than this unit)?",                            institutionLabel: "Property description",    valueLabel: "Current market value (USD)", hasInterest: true, multipleSlots: true  },
+    { key: "14-22", pageNum: 14, label: "Trust funds, life insurance with cash value, or other assets?",         institutionLabel: "Description of asset",    valueLabel: "Cash value (USD)",        hasInterest: true,  multipleSlots: true  },
   ];
   const assetFields: CompletionFormField[] = [];
   for (const q of assetQs) {
@@ -595,7 +614,9 @@ export async function buildManagerFormSchema(caseId: string): Promise<Completion
         fieldType: "yesno",
         required: true,
         completionOwner: "manager",
-        defaultValue: savedResponses.get("3-Owner") ?? "",
+        // Sprint 38: Baxter packets are submitted by the duly authorized agent
+        // (KBI golden standard) — default to "no" (= Duly Authorized Agent).
+        defaultValue: savedResponses.get("3-Owner") ?? "no",
       },
     ],
   });

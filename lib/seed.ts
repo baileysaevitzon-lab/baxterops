@@ -353,9 +353,11 @@ const RAW_COMPETITORS: CompetitorProperty[] = [
     threatLevel: 5,
     compQualityScore: 86,
     unitTypes: [
-      { type: "studio", minRent: 2901, maxRent: 3181, avgRent: 3041, minSqft: 541, maxSqft: 541, avgSqft: 541 },
-      { type: "1BR", minRent: 3003, maxRent: 4325, avgRent: 3664, minSqft: 759, maxSqft: 759, avgSqft: 759 },
-      { type: "2BR", minRent: 3789, maxRent: 5492, avgRent: 4641, minSqft: 1051, maxSqft: 5492, avgSqft: 3272 },
+      // Phase 9: seed is fallback-only; sqft synced to the approved Supabase correction
+      // (Phase 7). Rents intentionally UNCHANGED (call-around anchor; official rents stay observed-only).
+      { type: "studio", minRent: 2901, maxRent: 3181, avgRent: 3041, minSqft: 612, maxSqft: 973, avgSqft: 793 },
+      { type: "1BR", minRent: 3003, maxRent: 4325, avgRent: 3664, minSqft: 759, maxSqft: 831, avgSqft: 795 },
+      { type: "2BR", minRent: 3789, maxRent: 5492, avgRent: 4641, minSqft: 1054, maxSqft: 2223, avgSqft: 1639 },
     ],
     notes: "Major competitor. Largest free-rent concession on the market.",
   },
@@ -441,7 +443,10 @@ const RAW_COMPETITORS: CompetitorProperty[] = [
     compQualityScore: 71,
     unitTypes: [
       { type: "studio", minRent: 3060, maxRent: 3170, avgRent: 3115, minSqft: 751, maxSqft: 751, avgSqft: 751 },
-      { type: "1BR", minRent: 4000, maxRent: 4000, avgRent: 4000 },
+      // Sprint 28: aligned offline-seed fallback to the RESOLVED conflict value
+      // (sc-arrive-1br-rent-2026-06): Bailey June-2026 field tour $3,200 / 850 sqft,
+      // superseding the prior $4,000 internal estimate. Supabase already holds $3,200.
+      { type: "1BR", minRent: 3200, maxRent: 3200, avgRent: 3200, minSqft: 850, maxSqft: 850, avgSqft: 850 },
       { type: "2BR", minRent: 5823, maxRent: 6800, avgRent: 6312 },
     ],
   },

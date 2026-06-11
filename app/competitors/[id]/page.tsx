@@ -10,6 +10,8 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { Card, CardBody, CardHeader, PageHeader, Badge } from "@/components/Card";
 import { SourceBadge } from "@/components/SourceBadge";
+import { PhotoLightbox } from "@/components/PhotoLightbox";
+import { thumbUrl } from "@/lib/storageImage";
 import { fmtMoney } from "@/lib/calc";
 import { BAXTER_UNITS, COMPETITORS as SEED_COMPETITORS } from "@/lib/seed";
 import { loadCompetitor, updateCompetitorFields } from "@/lib/services/competitors";
@@ -62,6 +64,7 @@ export default function CompetitorDetailPage() {
   const [evidence, setEvidence] = useState<CompetitorEvidence | null>(null);
   const [conflicts, setConflicts] = useState<SourceConflictRow[]>([]);
   const [tab, setTab] = useState<Tab>("overview");
+  const [photoLightbox, setPhotoLightbox] = useState<number | null>(null);
   const [intel, setIntel] = useState<CompetitorIntelligenceSummary | null>(null);
   const [takeaways, setTakeaways] = useState<CompetitorTakeaway[]>([]);
 
@@ -525,15 +528,20 @@ export default function CompetitorDetailPage() {
           <CardHeader title={`Photo evidence · ${photos.length}`} subtitle="Thumbnails from Supabase Storage when public URL is populated." />
           <CardBody className="p-0">
             {photos.length === 0 ? (
-              <p className="p-5 text-sm text-slate-500">No photos yet. Use the dashboard upload widget.</p>
+              <p className="p-5 text-sm text-slate-500">
+                No photos yet. Upload field-tour photos in{" "}
+                <Link href="/photos-amenities" className="underline">Photos + Amenities</Link>.
+              </p>
             ) : (
               <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 p-5">
-                {photos.map(p => <PhotoCard key={p.id} p={p} />)}
+                {photos.map((p, idx) => <PhotoCard key={p.id} p={p} onOpen={() => setPhotoLightbox(idx)} />)}
               </div>
             )}
           </CardBody>
         </Card>
       )}
+
+      <PhotoLightbox photos={photos} index={photoLightbox} onClose={() => setPhotoLightbox(null)} onIndex={setPhotoLightbox} />
 
       {tab === "sources" && (
         <Card>
@@ -856,13 +864,24 @@ function Bar({ label, v }: { label: string; v: number }) {
     </div>
   );
 }
-function PhotoCard({ p }: { p: PhotoEvidenceRecord }) {
+function PhotoCard({ p, onOpen }: { p: PhotoEvidenceRecord; onOpen?: () => void }) {
   return (
     <div className="border border-slate-200 rounded-md overflow-hidden">
-      <div className="aspect-square bg-slate-100 flex items-center justify-center text-xs text-slate-400 text-center px-2">
+      <div
+        className={`aspect-square bg-slate-100 flex items-center justify-center text-xs text-slate-400 text-center px-2 ${p.publicUrl ? "cursor-zoom-in" : ""}`}
+        onClick={p.publicUrl ? onOpen : undefined}
+        role={p.publicUrl ? "button" : undefined}
+        title={p.publicUrl ? "Click to view full size" : undefined}
+      >
         {p.publicUrl ? (
           // eslint-disable-next-line @next/next/no-img-element
-          <img src={p.publicUrl} alt={p.caption} className="w-full h-full object-cover" />
+          <img
+            src={thumbUrl(p.publicUrl, 400)}
+            alt={p.caption}
+            loading="lazy"
+            className="w-full h-full object-cover"
+            onError={e => { const t = e.currentTarget; if (p.publicUrl && t.src !== p.publicUrl) t.src = p.publicUrl; }}
+          />
         ) : (
           <div>
             <div className="text-slate-500 font-medium">#{p.photoOrder}</div>

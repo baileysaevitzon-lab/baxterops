@@ -2,6 +2,7 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { Card, CardBody, CardHeader, PageHeader, Badge } from "@/components/Card";
+import { SCORING_THRESHOLDS } from "@/lib/scoringThresholds";
 import { useCompetitors } from "@/lib/hooks/useCompetitors";
 import { useTouredIds } from "@/lib/hooks/useTouredIds";
 import { useTouredOnly } from "@/lib/hooks/useTouredOnly";
@@ -156,7 +157,7 @@ export default function Competitors() {
       <LiveDataBanner />
       <PageHeader
         title="Competitor Database"
-        subtitle="17 Hollywood properties · smart threat classification powered by 3-score system. Open the Verification Queue tab to see what to confirm first."
+        subtitle={`${competitors.length} Hollywood properties · smart threat classification powered by 3-score system. Open the Verification Queue tab to see what to confirm first.`}
         action={
           <div className="flex gap-2 text-xs flex-wrap items-center">
             <TouredOnlyToggle
@@ -245,7 +246,7 @@ export default function Competitors() {
                           </Link>
                         )}
                         {c.compQualityScore !== undefined && (
-                          <Badge intent={c.compQualityScore >= 80 ? "bad" : c.compQualityScore >= 70 ? "warn" : "neutral"}>
+                          <Badge intent={c.compQualityScore >= SCORING_THRESHOLDS.threatBadgeScore ? "bad" : c.compQualityScore >= 70 ? "warn" : "neutral"}>
                             quality {c.compQualityScore}
                           </Badge>
                         )}

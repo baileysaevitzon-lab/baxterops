@@ -7,13 +7,14 @@ import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import { buildManagerFormSchema, type CompletionFormSchema } from "@/lib/services/recertCompletionForms";
 import { CompletionFormView } from "@/components/CompletionFormView";
+import { ManagerSignatureCapture } from "@/components/ManagerSignatureCapture";
 import { useAuth } from "@/components/AuthProvider";
 import Link from "next/link";
 
 export default function ManagerDocPage() {
   const params = useParams();
   const caseId = String(params?.caseId ?? "");
-  const { signedIn, loading: authLoading } = useAuth();
+  const { signedIn, loading: authLoading, profile, authUser } = useAuth();
   const [schema, setSchema] = useState<CompletionFormSchema | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -48,5 +49,16 @@ export default function ManagerDocPage() {
   );
   if (!schema) return <div className="p-6 text-sm text-slate-500">Building manager form…</div>;
 
-  return <CompletionFormView schema={schema} backHref={`/recertification/${caseId}`} />;
+  return (
+    <>
+      <CompletionFormView schema={schema} backHref={`/recertification/${caseId}`} />
+      <div className="max-w-3xl mx-auto px-4 pb-10">
+        <ManagerSignatureCapture
+          caseId={caseId}
+          managerName={profile?.full_name ?? undefined}
+          managerEmail={profile?.email ?? authUser?.email ?? undefined}
+        />
+      </div>
+    </>
+  );
 }

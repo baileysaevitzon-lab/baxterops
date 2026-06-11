@@ -1,15 +1,15 @@
 "use client";
-// Sprint 26 — Field Photo Manager.
+// Sprint 26/27 — Field Photo Manager.
 //
-// Clean, findable upload + view tool for competitor field-tour photos. Lives on
-// /photos-amenities (sidebar-linked), replacing the buried dashboard card as the
-// primary path. Fixes vs the old DashboardPhotoUpload:
-//   - competitor list from LIVE data (so every DB competitor appears, incl. new ones)
-//   - HEIC/HEIF guard: blocked with a clear "convert to JPG first" message
-//   - photo_order computed from MAX existing order in the target collection
-//   - visible per-file errors, distinguishing storage failure vs DB-row failure
-//     (DB failure reports the orphaned storage path)
-//   - shows existing photos for the selected competitor, placeholders labeled
+// Clean upload + view tool for competitor field-tour photos (/photos-amenities).
+// Sprint 27 adds the photo-size safety rails:
+//   - validate dimensions + file size before any upload
+//   - HEIC/HEIF blocked with a clear message
+//   - JPG/PNG/JPEG auto-resized via canvas to max 2000px longest side @ ~0.85
+//   - absurdly large images (> 12000px) blocked with human copy
+//   - per-file status: pending / validating / resizing / uploading / done / failed
+//   - NO storage upload if validation fails; NO photo_evidence row unless the
+//     storage upload succeeds; on DB failure the orphaned storage path is shown.
 
 import { useCallback, useEffect, useState } from "react";
 import { Card, CardBody, CardHeader, Badge } from "./Card";
@@ -18,9 +18,13 @@ import { useAuth } from "./AuthProvider";
 import { useCompetitors } from "@/lib/hooks/useCompetitors";
 import { loadAllFieldTours } from "@/lib/services/fieldTours";
 import { getCompetitorPhotoEvidence, getPhotoCollection, upsertPhotoEvidence } from "@/lib/services/photoEvidence";
+import { thumbUrl } from "@/lib/storageImage";
 import type { CompetitorFieldTour, PhotoEvidenceRecord } from "@/lib/types";
 
 const BUCKET = "baxter-ops-photos";
+const TARGET_DIM = 2000;          // longest side after resize
+const HARD_DIM = 12000;           // block above this (unprocessable / memory risk)
+const COMPRESS_BYTES = 3 * 1024 * 1024; // re-encode even if <=2000px when bigger than this
 
 const CATEGORIES = [
   "lobby", "exterior", "courtyard", "rooftop", "pool", "gym", "common_area",
@@ -29,7 +33,7 @@ const CATEGORIES = [
   "listing_screenshot", "other",
 ];
 
-type FileStatus = "pending" | "uploading" | "done" | "error" | "unsupported";
+type FileStatus = "pending" | "validating" | "resizing" | "uploading" | "done" | "failed" | "unsupported";
 
 interface PendingFile {
   id: string;
@@ -37,7 +41,7 @@ interface PendingFile {
   category: string;
   caption: string;
   status: FileStatus;
-  errorMsg?: string;
+  msg?: string;        // success note or failure reason
   publicUrl?: string;
 }
 
@@ -65,6 +69,27 @@ function guessCategory(filename: string): string {
   return "other";
 }
 
+/** Draw an ImageBitmap to a canvas scaled to maxDim longest side, return a JPEG blob. */
+async function drawResized(bitmap: ImageBitmap, maxDim: number, quality: number): Promise<{ blob: Blob; w: number; h: number }> {
+  let w = bitmap.width, h = bitmap.height;
+  const longest = Math.max(w, h);
+  if (longest > maxDim) {
+    const s = maxDim / longest;
+    w = Math.round(w * s);
+    h = Math.round(h * s);
+  }
+  const canvas = document.createElement("canvas");
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) throw new Error("Canvas not available in this browser");
+  ctx.drawImage(bitmap, 0, 0, w, h);
+  const blob = await new Promise<Blob>((resolve, reject) =>
+    canvas.toBlob(b => (b ? resolve(b) : reject(new Error("Image encoding failed"))), "image/jpeg", quality),
+  );
+  return { blob, w, h };
+}
+
 export function FieldPhotoManager() {
   const { profile, authUser } = useAuth();
   const { competitors } = useCompetitors();
@@ -80,7 +105,6 @@ export function FieldPhotoManager() {
 
   const sortedComps = [...competitors].sort((a, b) => a.name.localeCompare(b.name));
 
-  // Default to first competitor once live list loads.
   useEffect(() => {
     if (!competitorId && sortedComps.length) setCompetitorId(sortedComps[0].id);
   }, [sortedComps, competitorId]);
@@ -115,7 +139,7 @@ export function FieldPhotoManager() {
         category: guessCategory(f.name),
         caption: "",
         status: heic ? "unsupported" : "pending",
-        errorMsg: heic ? "HEIC/HEIF not supported by browsers — convert to JPG first." : undefined,
+        msg: heic ? "HEIC/HEIF not supported by browsers — convert to JPG first." : undefined,
       });
     }
     setFiles(prev => [...prev, ...next]);
@@ -142,29 +166,66 @@ export function FieldPhotoManager() {
     const prefix = `competitors/${compSlug}/field-tour-${tourDateSlug}`;
     const actor = profile?.full_name ?? authUser?.email ?? "Staff";
 
-    const uploadable = files.filter(f => f.status === "pending" || f.status === "error");
+    const uploadable = files.filter(f => f.status === "pending" || f.status === "failed");
     if (uploadable.length === 0) { setMsg("Nothing to upload (HEIC files must be converted first)."); return; }
 
     setBusy(true);
-    setMsg(`Uploading ${uploadable.length} file(s)…`);
+    setMsg(`Processing ${uploadable.length} file(s)…`);
 
-    // Robust next photo_order: max existing order in THIS collection + 1.
     const collRows = await getPhotoCollection(collectionId);
     let order = collRows.reduce((mx, r) => Math.max(mx, r.photoOrder ?? 0), 0) + 1;
 
     let okCount = 0;
     for (const pf of files) {
       if (pf.status === "done" || pf.status === "unsupported") continue;
-      updateFile(pf.id, { status: "uploading", errorMsg: undefined });
-      const safeName = pf.file.name.replace(/[^A-Za-z0-9._-]/g, "_");
-      const storagePath = `${prefix}/${String(order).padStart(2, "0")}-${safeName}`;
+
+      // ── 1. Validate dimensions + size; resize if needed ──────────────────────
+      updateFile(pf.id, { status: "validating", msg: undefined });
+      let uploadBlob: Blob = pf.file;
+      let resized = false;
+      let note = "";
+      let bitmap: ImageBitmap | null = null;
       try {
-        const { error: upErr } = await sb.storage.from(BUCKET).upload(storagePath, pf.file, {
-          contentType: pf.file.type || "image/jpeg",
+        bitmap = await createImageBitmap(pf.file);
+      } catch (e) {
+        updateFile(pf.id, { status: "failed", msg: `Could not read image (corrupt or unsupported): ${(e as Error).message}` });
+        continue;
+      }
+      const longest = Math.max(bitmap.width, bitmap.height);
+      if (longest > HARD_DIM) {
+        const dims = `${bitmap.width}x${bitmap.height}`;
+        bitmap.close?.();
+        updateFile(pf.id, { status: "failed", msg: `Image too large (${dims}). Please upload a compressed JPG under 2000px on the longest side.` });
+        continue;
+      }
+      if (longest > TARGET_DIM || pf.file.size > COMPRESS_BYTES) {
+        updateFile(pf.id, { status: "resizing" });
+        try {
+          const r = await drawResized(bitmap, TARGET_DIM, 0.85);
+          uploadBlob = r.blob;
+          resized = true;
+          note = `Auto-resized to ${Math.max(r.w, r.h)}px (${Math.round(r.blob.size / 1024)} KB)`;
+        } catch (e) {
+          bitmap.close?.();
+          updateFile(pf.id, { status: "failed", msg: `Resize failed: ${(e as Error).message}` });
+          continue;
+        }
+      }
+      bitmap.close?.();
+
+      // ── 2. Upload bytes (storage first) ──────────────────────────────────────
+      updateFile(pf.id, { status: "uploading", msg: note || undefined });
+      const safeBase = pf.file.name.replace(/[^A-Za-z0-9._-]/g, "_");
+      const finalName = resized ? safeBase.replace(/\.[^.]+$/, "") + ".jpg" : safeBase;
+      const storagePath = `${prefix}/${String(order).padStart(2, "0")}-${finalName}`;
+      try {
+        const { error: upErr } = await sb.storage.from(BUCKET).upload(storagePath, uploadBlob, {
+          contentType: resized ? "image/jpeg" : (pf.file.type || "image/jpeg"),
           upsert: true,
         });
-        if (upErr) { updateFile(pf.id, { status: "error", errorMsg: `Storage upload failed: ${upErr.message}` }); continue; }
+        if (upErr) { updateFile(pf.id, { status: "failed", msg: `Storage upload failed: ${upErr.message}` }); continue; }
 
+        // ── 3. Insert photo_evidence ONLY after storage succeeds ───────────────
         const { data: pub } = sb.storage.from(BUCKET).getPublicUrl(storagePath);
         const now = new Date().toISOString();
         const rec: PhotoEvidenceRecord = {
@@ -190,18 +251,14 @@ export function FieldPhotoManager() {
         try {
           await upsertPhotoEvidence(rec);
         } catch (dbErr) {
-          // Storage succeeded but DB row failed — report the orphan path, do not pretend success.
-          updateFile(pf.id, {
-            status: "error",
-            errorMsg: `Stored OK but DB row failed — orphan at ${storagePath}: ${(dbErr as Error).message}`,
-          });
+          updateFile(pf.id, { status: "failed", msg: `Stored OK but DB row failed — orphan at ${storagePath}: ${(dbErr as Error).message}` });
           continue;
         }
-        updateFile(pf.id, { status: "done", publicUrl: pub.publicUrl });
+        updateFile(pf.id, { status: "done", msg: note || undefined, publicUrl: pub.publicUrl });
         okCount++;
         order++;
       } catch (e) {
-        updateFile(pf.id, { status: "error", errorMsg: (e as Error).message ?? "upload failed" });
+        updateFile(pf.id, { status: "failed", msg: (e as Error).message ?? "upload failed" });
       }
     }
 
@@ -210,19 +267,30 @@ export function FieldPhotoManager() {
     await refreshExisting(competitorId);
   }
 
-  const uploadableCount = files.filter(f => f.status === "pending" || f.status === "error").length;
+  const uploadableCount = files.filter(f => f.status === "pending" || f.status === "failed").length;
   const heicCount = files.filter(f => f.status === "unsupported").length;
   const realExisting = existing.filter(p => p.storagePath || p.publicUrl);
   const placeholderExisting = existing.filter(p => !p.storagePath && !p.publicUrl);
+
+  function statusBadge(s: FileStatus, msg?: string) {
+    switch (s) {
+      case "pending": return <Badge>queued</Badge>;
+      case "validating": return <Badge intent="warn">validating</Badge>;
+      case "resizing": return <Badge intent="warn">resizing</Badge>;
+      case "uploading": return <Badge intent="warn">uploading</Badge>;
+      case "done": return <Badge intent="good">✓ done</Badge>;
+      case "unsupported": return <Badge intent="warn">convert</Badge>;
+      case "failed": return <Badge intent="bad">failed</Badge>;
+    }
+  }
 
   return (
     <Card className="border-l-4 border-l-sky-500 mb-6">
       <CardHeader
         title="Upload field-tour photos"
-        subtitle="Pick a competitor and its field tour, drop JPG/PNG files, set category/caption, upload. Files go to Supabase Storage and create photo_evidence rows."
+        subtitle="Pick a competitor and its field tour, drop JPG/PNG files, set category/caption, upload. Large photos are auto-resized to 2000px; HEIC must be converted first."
       />
       <CardBody>
-        {/* selectors */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-3 text-sm">
           <div>
             <label className="text-xs text-slate-500">Competitor</label>
@@ -244,13 +312,12 @@ export function FieldPhotoManager() {
           </div>
         </div>
 
-        {/* drop zone */}
         <label
           className="block border-2 border-dashed border-sky-300 rounded-lg p-6 text-center text-sm text-sky-900 bg-sky-50 hover:bg-sky-100 cursor-pointer"
           onDrop={e => { e.preventDefault(); addFiles(e.dataTransfer.files); }}
           onDragOver={e => e.preventDefault()}
         >
-          <strong>Drag photos here</strong> or click to choose. JPG/PNG upload directly; HEIC is flagged for conversion.
+          <strong>Drag photos here</strong> or click to choose. JPG/PNG upload directly (auto-resized if large); HEIC is flagged for conversion.
           <input type="file" multiple accept="image/*,.heic,.heif" className="hidden" onChange={e => addFiles(e.target.files)} />
         </label>
 
@@ -260,28 +327,24 @@ export function FieldPhotoManager() {
           </div>
         )}
 
-        {/* pending files */}
         {files.length > 0 && (
           <div className="mt-4 space-y-2">
             {files.map(pf => (
-              <div key={pf.id} className={`border rounded-md p-2 grid grid-cols-1 md:grid-cols-12 gap-2 items-center text-xs ${pf.status === "unsupported" ? "border-amber-300 bg-amber-50/40" : "border-slate-200"}`}>
+              <div key={pf.id} className={`border rounded-md p-2 grid grid-cols-1 md:grid-cols-12 gap-2 items-center text-xs ${pf.status === "unsupported" ? "border-amber-300 bg-amber-50/40" : pf.status === "failed" ? "border-rose-200 bg-rose-50/40" : "border-slate-200"}`}>
                 <div className="md:col-span-3 truncate font-mono">{pf.file.name}</div>
                 <select value={pf.category} disabled={pf.status === "unsupported"} onChange={e => updateFile(pf.id, { category: e.target.value })} className="md:col-span-2 border rounded px-2 py-1 bg-white disabled:opacity-50">
                   {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
                 </select>
                 <input value={pf.caption} disabled={pf.status === "unsupported"} onChange={e => updateFile(pf.id, { caption: e.target.value })} placeholder="caption / description" className="md:col-span-5 border rounded px-2 py-1 disabled:opacity-50" />
-                <div className="md:col-span-1">
-                  {pf.status === "pending" && <Badge>queued</Badge>}
-                  {pf.status === "uploading" && <Badge intent="warn">uploading</Badge>}
-                  {pf.status === "done" && <Badge intent="good">✓ done</Badge>}
-                  {pf.status === "unsupported" && <Badge intent="warn">convert</Badge>}
-                  {pf.status === "error" && <Badge intent="bad">error</Badge>}
-                </div>
+                <div className="md:col-span-1">{statusBadge(pf.status, pf.msg)}</div>
                 <div className="md:col-span-1 text-right">
-                  <button onClick={() => removeFile(pf.id)} className="text-rose-600 underline" disabled={pf.status === "uploading"}>×</button>
+                  <button onClick={() => removeFile(pf.id)} className="text-rose-600 underline" disabled={pf.status === "uploading" || pf.status === "resizing" || pf.status === "validating"}>×</button>
                 </div>
-                {pf.status === "error" && pf.errorMsg && <div className="md:col-span-12 text-rose-700">{pf.errorMsg}</div>}
-                {pf.status === "unsupported" && <div className="md:col-span-12 text-amber-700">{pf.errorMsg}</div>}
+                {pf.msg && (pf.status === "failed" || pf.status === "unsupported")
+                  ? <div className={`md:col-span-12 ${pf.status === "failed" ? "text-rose-700" : "text-amber-700"}`}>{pf.msg}</div>
+                  : pf.msg && pf.status === "done"
+                  ? <div className="md:col-span-12 text-emerald-700">{pf.msg}</div>
+                  : null}
               </div>
             ))}
           </div>
@@ -293,7 +356,7 @@ export function FieldPhotoManager() {
             disabled={busy || uploadableCount === 0 || !competitorId || !tourId}
             className="px-4 py-2 rounded-md bg-slate-900 text-white text-sm disabled:opacity-40"
           >
-            {busy ? "Uploading…" : `Upload ${uploadableCount} file${uploadableCount === 1 ? "" : "s"}`}
+            {busy ? "Working…" : `Upload ${uploadableCount} file${uploadableCount === 1 ? "" : "s"}`}
           </button>
           {competitorId && (
             <a href={`/competitors/${competitorId.replace(/^c-/, "")}`} className="text-xs text-sky-700 underline">View competitor detail →</a>
@@ -301,7 +364,6 @@ export function FieldPhotoManager() {
           {msg && <span className="text-xs text-slate-500">{msg}</span>}
         </div>
 
-        {/* existing photos for this competitor */}
         <div className="mt-6 border-t border-slate-100 pt-4">
           <div className="text-xs font-semibold text-slate-600 mb-2">
             Existing photos for this competitor: {realExisting.length} real
@@ -319,7 +381,13 @@ export function FieldPhotoManager() {
                     <div className="aspect-square bg-slate-100 flex items-center justify-center text-[10px] text-slate-400 text-center px-1 relative">
                       {p.publicUrl ? (
                         // eslint-disable-next-line @next/next/no-img-element
-                        <img src={p.publicUrl} alt={p.caption ?? ""} className="w-full h-full object-cover" />
+                        <img
+                          src={thumbUrl(p.publicUrl, 200)}
+                          alt={p.caption ?? ""}
+                          loading="lazy"
+                          className="w-full h-full object-cover"
+                          onError={e => { const t = e.currentTarget; if (p.publicUrl && t.src !== p.publicUrl) t.src = p.publicUrl; }}
+                        />
                       ) : (
                         <span>#{p.photoOrder} {placeholder ? "placeholder" : "no image"}</span>
                       )}
